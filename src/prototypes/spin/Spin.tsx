@@ -55,7 +55,7 @@ const SPIRAL_ICON = Array.from({ length: 41 }, (_, i) => {
   return `${i ? 'L' : 'M'}${(12 + Math.cos(th) * r).toFixed(2)} ${(12 + Math.sin(th) * r).toFixed(2)}`
 }).join('')
 const VOICE_ICONS: Record<Voice, React.ReactElement> = {
-  bowl: <svg {...vIcon}><path d="M3.5 11h17c0 4.4-3.8 7.5-8.5 7.5S3.5 15.4 3.5 11z" /><path d="M9 21h6" /><path d="M8.5 6.8q3.5-3 7 0" opacity=".6" /></svg>,
+  bowl: <svg {...vIcon}><path d="M3.8 9.5c1.9 7.2 14.5 7.2 16.4 0-2.4 3.1-14 3.1-16.4 0z" /><path d="M9 20h6" opacity=".6" /></svg>,
   kalimba: <svg {...vIcon}><rect x="5" y="3.5" width="14" height="17" rx="3.5" /><path d="M9 8v8M12 8v10M15 8v7" /></svg>,
   marimba: <svg {...vIcon} strokeWidth="2.4"><path d="M4 7h16M6 12h12M8 17h8" /></svg>,
   drops: <svg {...vIcon}><path d={SPIRAL_ICON} /></svg>,
@@ -149,6 +149,17 @@ export default function Spin() {
   })
 
   s.current.th = theme // the canvas reads the look from here
+  useEffect(() => { // the page behind the column and the browser bar take the palette's colour
+    const html = document.documentElement
+    html.classList.add('spin-active'); html.style.setProperty('--bg', theme.bg)
+    const meta = document.querySelector('meta[name="theme-color"]'), prevMeta = meta?.getAttribute('content') ?? null
+    meta?.setAttribute('content', theme.bg)
+    return () => {
+      html.classList.remove('spin-active'); html.style.removeProperty('--bg')
+      if (meta && prevMeta !== null) meta.setAttribute('content', prevMeta)
+    }
+  }, [theme.bg])
+
   useEffect(() => {
     try { localStorage.setItem(LOOK_KEY, JSON.stringify({ theme: themeId })) } catch { /* private mode */ }
   }, [themeId])
@@ -630,7 +641,7 @@ export default function Spin() {
     <div ref={wrap} className="sp-root" tabIndex={0} role="application"
       aria-label="Spinner. Arrow keys spin it."
       onKeyDown={onKey} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
-      style={{ position: 'fixed', inset: 0, background: 'var(--bg)', overflow: 'hidden', touchAction: 'none', userSelect: 'none',
+      style={{ position: 'fixed', top: 0, bottom: 0, left: 0, right: 0, maxWidth: 520, margin: '0 auto', background: 'var(--bg)', overflow: 'hidden', touchAction: 'none', userSelect: 'none',
         fontFamily: SANS,
         ['--bg' as string]: theme.bg, ['--ink' as string]: theme.ink, ['--pill' as string]: theme.pill, ['--pillb' as string]: theme.pillBorder,
         ['--pillt' as string]: theme.pillText, ['--pressed' as string]: theme.pressed, ['--onaccent' as string]: theme.onAccent, ['--accent' as string]: theme.accents[voice] } as React.CSSProperties}>
