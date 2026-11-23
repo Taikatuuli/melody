@@ -40,29 +40,25 @@ const CSS = `
 .sp-btn:focus-visible{outline:2px solid #fff;outline-offset:2px}
 fieldset.sp-fs{border:0;margin:0;padding:0;min-width:0}
 .sp-vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;padding:0}
-.sp-seg{display:flex;padding:3px;gap:2px;background:rgba(255,255,255,.06);border-radius:14px}
-.sp-seg label{flex:1;position:relative;display:block}
-.sp-radio{position:absolute;opacity:0;width:1px;height:1px}
-.sp-seg span{display:grid;place-items:center;height:38px;border-radius:11px;font-size:13px;letter-spacing:.3px;opacity:.55;text-transform:capitalize;cursor:pointer;transition:background .25s,opacity .25s}
-.sp-radio:checked + span{background:rgba(255,255,255,.16);opacity:1}
-.sp-radio:focus-visible + span{outline:2px solid #fff;outline-offset:1px}
-.sp-chip{flex:1;display:flex;align-items:center;justify-content:space-between;height:44px;padding:0 12px;border-radius:14px;background:rgba(255,255,255,.06);font-size:14px;cursor:pointer}
-.sp-sw-in{position:absolute;opacity:0;width:1px;height:1px}
-.sp-sw{position:relative;flex:none;width:40px;height:24px;border-radius:12px;background:rgba(255,255,255,.18);transition:background .25s}
-.sp-sw::after{content:'';position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 2px 5px rgba(0,0,0,.35);transition:transform .25s cubic-bezier(.2,.8,.2,1)}
-.sp-sw-in:checked + .sp-sw{background:#7b86f5}
-.sp-sw-in:checked + .sp-sw::after{transform:translateX(16px)}
-.sp-sw-in:focus-visible + .sp-sw{outline:2px solid #fff;outline-offset:2px}
-@media (prefers-reduced-motion: reduce){.sp-sw,.sp-sw::after,.sp-seg span{transition:none}}
+.sp-pills{display:flex;justify-content:center;gap:8px;flex-wrap:wrap}
+.sp-pill{position:relative;display:block;cursor:pointer}
+.sp-pill::after{content:'';position:absolute;inset:-4px} /* 36px pill, 44px touch target */
+.sp-pill input{position:absolute;opacity:0;width:1px;height:1px}
+.sp-pill span{display:flex;align-items:center;gap:7px;height:36px;padding:0 16px;border-radius:999px;font-size:13px;letter-spacing:.3px;text-transform:capitalize;color:rgba(255,255,255,.72);background:rgba(12,12,22,.4);border:1px solid rgba(255,255,255,.16);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);transition:background .25s,color .25s,border-color .25s}
+.sp-pill input:checked + span{background:rgba(255,255,255,.92);color:#0b0b14;border-color:transparent}
+.sp-pill.tg input:checked + span{background:rgba(169,180,255,.2);color:#fff;border-color:rgba(169,180,255,.7)}
+.sp-pill.tg span::before{content:'';width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.3);transition:background .25s,box-shadow .25s}
+.sp-pill.tg input:checked + span::before{background:#a9b4ff;box-shadow:0 0 8px #a9b4ff}
+.sp-pill input:focus-visible + span{outline:2px solid #fff;outline-offset:2px}
+@media (prefers-reduced-motion: reduce){.sp-pill span,.sp-pill span::before{transition:none}}
 `
 
-// a switch is the right control for an independent on/off setting
-function SwitchChip({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+// an independent on/off option: a toggle pill (still a real switch underneath)
+function TogglePill({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <label className="sp-chip">
+    <label className="sp-pill tg">
+      <input type="checkbox" role="switch" checked={checked} onChange={(e) => onChange(e.target.checked)} />
       <span>{label}</span>
-      <input className="sp-sw-in" type="checkbox" role="switch" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-      <span className="sp-sw" aria-hidden="true" />
     </label>
   )
 }
@@ -508,32 +504,33 @@ export default function Spin() {
         </button>
       </div>
 
-      {/* sound controls live in a slim dock under the spinner: never a modal, so you can change them mid-spin */}
+      {/* sound controls: minimal pills under the spinner, never a modal, so you can change them mid-spin */}
       <div role="group" aria-label="Sound" onPointerDown={stop}
         onPointerMove={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()} onPointerCancel={(e) => e.stopPropagation()}
-        style={{ position: 'absolute', left: 12, right: 12, bottom: 'calc(var(--safe-bottom) + 96px)', maxWidth: 420, margin: '0 auto',
-          padding: 8, borderRadius: 24, color: '#fff', background: 'rgba(24,24,40,0.55)', display: 'flex', flexDirection: 'column', gap: 8,
-          backdropFilter: 'blur(26px) saturate(1.3)', WebkitBackdropFilter: 'blur(26px) saturate(1.3)',
-          border: '1px solid rgba(255,255,255,0.09)', boxShadow: '0 8px 36px rgba(0,0,0,0.4)',
+        style={{ position: 'absolute', left: 12, right: 12, bottom: 'calc(var(--safe-bottom) + 100px)', maxWidth: 420, margin: '0 auto',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, color: '#fff',
           opacity: chrome ? 1 : 0.5, transition: 'opacity .6s ease-out' }}>
-        {/* choose one of four: radio group */}
+        {/* choose one: radio pills */}
         <fieldset className="sp-fs">
           <legend className="sp-vh">Instrument</legend>
-          <div className="sp-seg">
+          <div className="sp-pills">
             {VOICES.map((v) => (
-              <label key={v}>
-                <input className="sp-radio" type="radio" name="voice" value={v} checked={voice === v}
+              <label key={v} className="sp-pill">
+                <input type="radio" name="voice" value={v} checked={voice === v}
                   onChange={() => { ensureAudio(); setTouched(true); s.current.voice = v; setVoiceState(v); note(7) }} />
                 <span>{v}</span>
               </label>
             ))}
           </div>
         </fieldset>
-        {/* independent on/off: switches */}
-        <div style={{ display: 'flex', gap: 8 }}>
-          <SwitchChip label="Pad" checked={padOn} onChange={(v) => { ensureAudio(); setTouched(true); setPadOn(v); setPad(v) }} />
-          <SwitchChip label="Air" checked={noiseOn} onChange={(v) => { ensureAudio(); setTouched(true); setNoiseOn(v); setNoise(v) }} />
-        </div>
+        {/* independent on/off: toggle pills */}
+        <fieldset className="sp-fs">
+          <legend className="sp-vh">Layers</legend>
+          <div className="sp-pills">
+            <TogglePill label="Pad" checked={padOn} onChange={(v) => { ensureAudio(); setTouched(true); setPadOn(v); setPad(v) }} />
+            <TogglePill label="Air" checked={noiseOn} onChange={(v) => { ensureAudio(); setTouched(true); setNoiseOn(v); setNoise(v) }} />
+          </div>
+        </fieldset>
       </div>
     </div>
   )
