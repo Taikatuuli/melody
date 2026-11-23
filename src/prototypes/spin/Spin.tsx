@@ -496,7 +496,18 @@ export default function Spin() {
           case 'marimba': // thick, shorter bars
             ctx.moveTo(x - ca * r * 1.5, y - sa * r * 1.5); ctx.lineTo(x + ca * r * 1.5, y + sa * r * 1.5)
             ctx.lineWidth = r * 1.4; ctx.lineCap = 'round'; ctx.stroke(); break
-          default: ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill() // bowl and drops: plain filled dots
+          case 'bowl': { // a lotus petal: a rounded base and a pointed tip, pointing outward
+            const R = r * 1.25
+            const P = (u: number, v: number): [number, number] => [x + (ca * u - sa * v) * R, y + (sa * u + ca * v) * R] // u outward, v across
+            const base = P(-1.15, 0), tip = P(2.15, 0)
+            ctx.moveTo(base[0], base[1])
+            const a1 = P(-1.35, 2.05), a2 = P(0.55, 2.0)
+            ctx.bezierCurveTo(a1[0], a1[1], a2[0], a2[1], tip[0], tip[1])
+            const b1 = P(0.55, -2.0), b2 = P(-1.35, -2.05)
+            ctx.bezierCurveTo(b1[0], b1[1], b2[0], b2[1], base[0], base[1])
+            ctx.closePath(); ctx.fill(); break
+          }
+          default: ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill() // drops: plain filled dots
         }
         ctx.globalAlpha = 1
       }
