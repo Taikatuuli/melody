@@ -10,43 +10,30 @@ const VOICES: Voice[] = ['bowl', 'kalimba', 'marimba', 'drops']
 // ---- looks you can try: palette, dot count, dot shape, font
 type Theme = {
   name: string; bg: string; ink: string; ring: string; dust: [string, string, string]; hub: string
-  pill: string; pillBorder: string; pillText: string; pressed: string; accents: Record<Voice, string>
+  pill: string; pillBorder: string; pillText: string; pressed: string; onAccent: string; accents: Record<Voice, string>
 }
 const THEMES = {
-  charcoal: { name: 'Charcoal', bg: '#131318', ink: '#ece9f5', ring: '#33333f', dust: ['#3d3d4a', '#31313c', '#272731'], hub: '#5a5a69',
-    pill: '#1b1b22', pillBorder: '#2b2b35', pillText: '#a3a1b4', pressed: '#25252e',
-    accents: { bowl: '#a79fe3', kalimba: '#dcbf90', marimba: '#dc9fac', drops: '#8ab2de' } },
-  paper: { name: 'Paper', bg: '#efe9dd', ink: '#2b2824', ring: '#cfc6b4', dust: ['#c3b9a5', '#d0c7b4', '#dad2c1'], hub: '#9d937f',
-    pill: '#e5ddcd', pillBorder: '#d3c9b4', pillText: '#6d665a', pressed: '#e0d7c4',
-    accents: { bowl: '#b5654a', kalimba: '#c4973f', marimba: '#6e8f73', drops: '#3f5e86' } },
-  dusk: { name: 'Dusk', bg: '#1b1836', ink: '#f6d9bf', ring: '#3b3766', dust: ['#47427a', '#393564', '#2e2b52'], hub: '#6f69a8',
-    pill: '#25214a', pillBorder: '#35306a', pillText: '#b5a9d6', pressed: '#2d2959',
-    accents: { bowl: '#f0a58a', kalimba: '#f4cf9a', marimba: '#e8899a', drops: '#c9a8e6' } },
-  moss: { name: 'Moss', bg: '#16201b', ink: '#e6ead9', ring: '#2e3d35', dust: ['#3a4b41', '#2f3e36', '#26332c'], hub: '#5d7266',
-    pill: '#1d2924', pillBorder: '#2c3b34', pillText: '#9fb0a4', pressed: '#25332c',
-    accents: { bowl: '#9cc4a0', kalimba: '#d6c58a', marimba: '#d99e8a', drops: '#8fb8c9' } },
   mono: { name: 'Mono', bg: '#0d0d0d', ink: '#f4f4f4', ring: '#333333', dust: ['#3a3a3a', '#2c2c2c', '#222222'], hub: '#666666',
-    pill: '#171717', pillBorder: '#2a2a2a', pillText: '#9a9a9a', pressed: '#222222',
+    pill: '#171717', pillBorder: '#2a2a2a', pillText: '#9a9a9a', pressed: '#222222', onAccent: '#0d0d0d',
     accents: { bowl: '#f4f4f4', kalimba: '#f4f4f4', marimba: '#f4f4f4', drops: '#f4f4f4' } },
+  chalk: { name: 'Chalk', bg: '#f4f4f2', ink: '#141414', ring: '#cfcfcb', dust: ['#c4c4c0', '#d2d2ce', '#dcdcd8'], hub: '#9a9a96',
+    pill: '#eaeae6', pillBorder: '#d6d6d1', pillText: '#6a6a66', pressed: '#e2e2de', onAccent: '#f4f4f2',
+    accents: { bowl: '#141414', kalimba: '#141414', marimba: '#141414', drops: '#141414' } },
+  blush: { name: 'Blush', bg: '#f7efec', ink: '#3a2630', ring: '#e6cfd0', dust: ['#e0c7c9', '#e9d6d6', '#f0e2e1'], hub: '#c9a3a8',
+    pill: '#f0dede', pillBorder: '#e6cccd', pillText: '#8a6670', pressed: '#ead6d6', onAccent: '#fff6f4',
+    accents: { bowl: '#cf4d78', kalimba: '#d85a82', marimba: '#c0406d', drops: '#d9628d' } },
 } satisfies Record<string, Theme>
 type ThemeId = keyof typeof THEMES
 const THEME_IDS = Object.keys(THEMES) as ThemeId[]
 const COUNTS = [6, 8, 12, 18, 24]
-type Shape = 'circle' | 'bar' | 'petal' | 'diamond' | 'ring'
-const SHAPES: Shape[] = ['circle', 'bar', 'petal', 'diamond', 'ring']
-type FontId = 'sans' | 'serif'
-const FONTS: Record<FontId, { name: string; stack: string; weight: number }> = {
-  sans: { name: 'Sans', stack: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif', weight: 200 },
-  serif: { name: 'Serif', stack: 'ui-serif, "New York", "Iowan Old Style", Georgia, "Times New Roman", serif', weight: 300 },
-}
+const SANS = '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif'
 const dotSize = (n: number) => Math.max(3, Math.min(10, 21 / Math.sqrt(n))) // fewer dots are bigger, more dots smaller
 const LOOK_KEY = 'spin-look'
-const readLook = (): { theme: ThemeId; n: number; shape: Shape; font: FontId } => {
-  const d = { theme: 'charcoal' as ThemeId, n: 12, shape: 'circle' as Shape, font: 'sans' as FontId }
+const readLook = (): { theme: ThemeId; n: number } => {
+  const d = { theme: 'mono' as ThemeId, n: 12 }
   try {
     const j = JSON.parse(localStorage.getItem(LOOK_KEY) || '{}')
-    return { theme: j.theme in THEMES ? j.theme : d.theme, n: COUNTS.includes(j.n) ? j.n : d.n,
-      shape: SHAPES.includes(j.shape) ? j.shape : d.shape, font: j.font in FONTS ? j.font : d.font }
+    return { theme: j.theme in THEMES ? j.theme : d.theme, n: COUNTS.includes(j.n) ? j.n : d.n }
   } catch { return d }
 }
 const IN_S = 4, OUT_S = 6 // breath: 4 in, 6 out
@@ -68,13 +55,6 @@ const VOICE_ICONS: Record<Voice, React.ReactElement> = {
   drops: <svg {...vIcon}><path d="M12 3.5c3.6 4.4 6 7.2 6 10a6 6 0 0 1-12 0c0-2.8 2.4-5.6 6-10z" /></svg>,
 }
 const LookIcon = () => <svg {...iconProps}><path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.4 0 2-1 1.6-2.1-.4-1.2.3-2.4 1.6-2.4H17a3.5 3.5 0 0 0 3.5-3.6C20.5 7.2 16.8 3.5 12 3.5z" /><circle cx="7.8" cy="11.2" r=".9" fill="currentColor" stroke="none" /><circle cx="10.4" cy="7.4" r=".9" fill="currentColor" stroke="none" /><circle cx="14.8" cy="7.6" r=".9" fill="currentColor" stroke="none" /></svg>
-const SHAPE_GLYPHS: Record<Shape, React.ReactElement> = {
-  circle: <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="4.6" fill="currentColor" /></svg>,
-  bar: <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M9 2.5v13" stroke="currentColor" strokeWidth="4" strokeLinecap="round" /></svg>,
-  petal: <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><ellipse cx="9" cy="9" rx="3.2" ry="7" fill="currentColor" /></svg>,
-  diamond: <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M9 1.8l4.6 7.2L9 16.2 4.4 9z" fill="currentColor" /></svg>,
-  ring: <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="5.2" fill="none" stroke="currentColor" strokeWidth="2" /></svg>,
-}
 const iconBtn = (on: boolean): React.CSSProperties => ({
   width: 44, height: 44, display: 'grid', placeItems: 'center', border: 0, borderRadius: 22, color: 'var(--ink)',
   background: on ? 'var(--pressed)' : 'transparent', transition: 'background .3s, opacity .5s',
@@ -90,10 +70,9 @@ fieldset.sp-fs{border:0;margin:0;padding:0;min-width:0}
 .sp-pill::after{content:'';position:absolute;inset:-4px} /* 36px pill, 44px touch target */
 .sp-pill input{position:absolute;opacity:0;width:1px;height:1px}
 .sp-pill span{display:flex;align-items:center;gap:7px;height:36px;padding:0 16px;border-radius:999px;font-size:13px;letter-spacing:.3px;text-transform:capitalize;color:var(--pillt);background:var(--pill);border:1px solid var(--pillb);transition:background .25s,color .25s,border-color .25s}
-.sp-pill input:checked + span{background:var(--accent);color:var(--bg);border-color:transparent}
+.sp-pill input:checked + span{background:var(--accent);color:var(--onaccent);border-color:transparent}
 .sp-pill.vo span{padding:0 10px;gap:5px}
 .sp-pill.sq span{padding:0;width:36px;justify-content:center}
-.sp-pill.fo span{padding:0 14px;text-transform:none;font-size:14px}
 .sp-pill.sw span{padding:0;width:36px;justify-content:center;background:transparent}
 .sp-pill.sw input:checked + span{background:transparent;border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
 .sp-pill svg{flex:none}
@@ -136,8 +115,6 @@ export default function Spin() {
   const [look] = useState(readLook) // restored from the last visit
   const [themeId, setThemeId] = useState<ThemeId>(look.theme)
   const [n, setN] = useState(look.n)
-  const [shape, setShape] = useState<Shape>(look.shape)
-  const [font, setFont] = useState<FontId>(look.font)
   const [lookOpen, setLookOpen] = useState(false)
   const theme: Theme = THEMES[themeId]
   const padRef = useRef<{ gain: GainNode; oscs: OscillatorNode[]; lfo: OscillatorNode } | null>(null)
@@ -145,14 +122,14 @@ export default function Spin() {
 
   const s = useRef({
     rot: 0, w: 0.15, dragging: false, lastA: 0, lastT: 0,
-    pulse: new Float32Array(MAX_N), th: THEMES.charcoal as Theme, n: 12, step: (Math.PI * 2) / 12, shape: 'circle' as Shape, lastNote: 0, muted: false, voice: 'bowl' as Voice, cyFrac: 0.44, pid: -1, cycleIdx: 0, W: 0, H: 0,
+    pulse: new Float32Array(MAX_N), th: THEMES.mono as Theme, n: 12, step: (Math.PI * 2) / 12, lastNote: 0, muted: false, voice: 'bowl' as Voice, cyFrac: 0.44, pid: -1, cycleIdx: 0, W: 0, H: 0,
     breathOn: false, breathT0: 0, ended: false, phase: 'in' as 'in' | 'out',
   })
 
-  s.current.th = theme; s.current.n = n; s.current.step = (Math.PI * 2) / n; s.current.shape = shape // the canvas reads the look from here
+  s.current.th = theme; s.current.n = n; s.current.step = (Math.PI * 2) / n // the canvas reads the look from here
   useEffect(() => {
-    try { localStorage.setItem(LOOK_KEY, JSON.stringify({ theme: themeId, n, shape, font })) } catch { /* private mode */ }
-  }, [themeId, n, shape, font])
+    try { localStorage.setItem(LOOK_KEY, JSON.stringify({ theme: themeId, n })) } catch { /* private mode */ }
+  }, [themeId, n])
 
   const ensureAudio = () => {
     if (audio.current) {
@@ -371,14 +348,20 @@ export default function Spin() {
         const ca = Math.cos(ang), sa = Math.sin(ang)
         ctx.globalAlpha = alpha; ctx.fillStyle = color; ctx.strokeStyle = color
         ctx.beginPath()
-        switch (st.shape) {
-          case 'bar': ctx.moveTo(x - ca * r * 1.9, y - sa * r * 1.9); ctx.lineTo(x + ca * r * 1.9, y + sa * r * 1.9)
-            ctx.lineWidth = r * 1.15; ctx.lineCap = 'round'; ctx.stroke(); break
-          case 'petal': ctx.ellipse(x, y, r * 2, r * 0.82, ang, 0, Math.PI * 2); ctx.fill(); break
-          case 'diamond': ctx.moveTo(x + ca * r * 1.5, y + sa * r * 1.5); ctx.lineTo(x - sa * r * 0.95, y + ca * r * 0.95)
-            ctx.lineTo(x - ca * r * 1.5, y - sa * r * 1.5); ctx.lineTo(x + sa * r * 0.95, y - ca * r * 0.95); ctx.closePath(); ctx.fill(); break
-          case 'ring': ctx.arc(x, y, r * 0.95, 0, Math.PI * 2); ctx.lineWidth = Math.max(1.6, r * 0.34); ctx.stroke(); break
-          default: ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill()
+        switch (st.voice) { // every instrument has its own shape
+          case 'kalimba': // thin, long tines
+            ctx.moveTo(x - ca * r * 2.5, y - sa * r * 2.5); ctx.lineTo(x + ca * r * 2.5, y + sa * r * 2.5)
+            ctx.lineWidth = Math.max(1.6, r * 0.62); ctx.lineCap = 'round'; ctx.stroke(); break
+          case 'marimba': // thick, shorter bars
+            ctx.moveTo(x - ca * r * 1.5, y - sa * r * 1.5); ctx.lineTo(x + ca * r * 1.5, y + sa * r * 1.5)
+            ctx.lineWidth = r * 1.4; ctx.lineCap = 'round'; ctx.stroke(); break
+          case 'drops': { // a small teardrop pointing outward
+            const cxd = x - ca * r * 0.3, cyd = y - sa * r * 0.3, rd = r * 0.95
+            ctx.arc(cxd, cyd, rd, 0, Math.PI * 2); ctx.fill()
+            ctx.beginPath(); ctx.moveTo(x + ca * r * 1.95, y + sa * r * 1.95)
+            ctx.lineTo(cxd - sa * rd, cyd + ca * rd); ctx.lineTo(cxd + sa * rd, cyd - ca * rd); ctx.closePath(); ctx.fill(); break
+          }
+          default: ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill() // bowl: a filled circle
         }
         ctx.globalAlpha = 1
       }
@@ -450,7 +433,7 @@ export default function Spin() {
 
   const poke = () => setPokeTick((n) => n + 1)
   const stop = (e: React.PointerEvent) => { e.stopPropagation(); poke() }
-  const hintBottom = lookOpen ? 290 : 190
+  const hintBottom = lookOpen ? 240 : 190
 
   // keyboard access to the spinner itself: arrows spin it
   const onKey = (e: React.KeyboardEvent) => {
@@ -466,18 +449,18 @@ export default function Spin() {
       aria-label="Spinner. Arrow keys spin it."
       onKeyDown={onKey} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
       style={{ position: 'fixed', inset: 0, background: 'var(--bg)', overflow: 'hidden', touchAction: 'none', userSelect: 'none',
-        fontFamily: FONTS[font].stack, transition: 'background .35s',
+        fontFamily: SANS, transition: 'background .35s',
         ['--bg' as string]: theme.bg, ['--ink' as string]: theme.ink, ['--pill' as string]: theme.pill, ['--pillb' as string]: theme.pillBorder,
-        ['--pillt' as string]: theme.pillText, ['--pressed' as string]: theme.pressed, ['--accent' as string]: theme.accents[voice] } as React.CSSProperties}>
+        ['--pillt' as string]: theme.pillText, ['--pressed' as string]: theme.pressed, ['--onaccent' as string]: theme.onAccent, ['--accent' as string]: theme.accents[voice] } as React.CSSProperties}>
       <style>{CSS}</style>
       <canvas ref={cvs} aria-hidden="true" style={{ width: '100%', height: '100%', display: 'block' }} />
 
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: `calc(var(--safe-bottom) + ${hintBottom}px)`, textAlign: 'center',
         color: 'var(--ink)', pointerEvents: 'none', opacity: touched ? 0 : 1, transition: 'opacity 1.2s ease-out, bottom .5s' }}>
-        <div style={{ fontSize: 22, fontWeight: FONTS[font].weight, letterSpacing: 1 }}>Flick to spin</div>
+        <div style={{ fontSize: 22, fontWeight: 200, letterSpacing: 1 }}>Flick to spin</div>
       </div>
       <div role="status" aria-live="polite" style={{ position: 'absolute', left: 0, right: 0, bottom: `calc(var(--safe-bottom) + ${hintBottom}px)`,
-        textAlign: 'center', color: 'var(--ink)', fontSize: 22, fontWeight: FONTS[font].weight, letterSpacing: 1, pointerEvents: 'none',
+        textAlign: 'center', color: 'var(--ink)', fontSize: 22, fontWeight: 200, letterSpacing: 1, pointerEvents: 'none',
         opacity: breathOn && !ended ? 0.85 : 0, transition: 'opacity 0.8s ease-out, bottom .5s' }}>
         {breathOn && !ended ? `Breathe ${phase}` : ''}
       </div>
@@ -486,7 +469,7 @@ export default function Spin() {
         opacity: breathOn && !ended ? 0.55 : 0, transition: 'opacity .8s ease-out' }}>{cycles} {cycles === 1 ? 'breath' : 'breaths'}</div>
       <div aria-hidden={!ended} style={{ position: 'absolute', inset: 0, background: 'var(--bg)', pointerEvents: 'none',
         opacity: ended ? 0.94 : 0, transition: `opacity ${FADE_S}s ease-in-out`, display: 'grid', placeItems: 'center' }}>
-        <div style={{ color: 'var(--ink)', fontSize: 22, fontWeight: FONTS[font].weight, letterSpacing: 1, opacity: ended ? 0.7 : 0,
+        <div style={{ color: 'var(--ink)', fontSize: 22, fontWeight: 200, letterSpacing: 1, opacity: ended ? 0.7 : 0,
           transition: `opacity ${FADE_S}s ease-in-out`, textAlign: 'center' }}>
           Rest<div style={{ fontSize: 13, opacity: 0.55, marginTop: 8, fontWeight: 400 }}>Tap to continue</div>
         </div>
@@ -564,28 +547,6 @@ export default function Spin() {
                 <label key={c} className="sp-pill sq">
                   <input type="radio" name="count" value={c} checked={n === c} onChange={() => setN(c)} />
                   <span>{c}</span>
-                </label>
-              ))}
-            </div></div>
-        </fieldset>
-        <fieldset className="sp-fs"><legend className="sp-vh">Shape</legend>
-          <div className="sp-row"><span className="sp-rowl" aria-hidden="true">Shape</span>
-            <div className="sp-pills">
-              {SHAPES.map((sh) => (
-                <label key={sh} className="sp-pill sq">
-                  <input type="radio" name="shape" value={sh} checked={shape === sh} onChange={() => setShape(sh)} />
-                  <span>{SHAPE_GLYPHS[sh]}<b className="sp-vh">{sh}</b></span>
-                </label>
-              ))}
-            </div></div>
-        </fieldset>
-        <fieldset className="sp-fs"><legend className="sp-vh">Font</legend>
-          <div className="sp-row"><span className="sp-rowl" aria-hidden="true">Font</span>
-            <div className="sp-pills">
-              {(Object.keys(FONTS) as FontId[]).map((f) => (
-                <label key={f} className="sp-pill fo">
-                  <input type="radio" name="font" value={f} checked={font === f} onChange={() => setFont(f)} />
-                  <span style={{ fontFamily: FONTS[f].stack }}>{FONTS[f].name}</span>
                 </label>
               ))}
             </div></div>
