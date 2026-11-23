@@ -479,7 +479,7 @@ export default function Spin() {
       const ripple = st.voice === 'ripple'
       // no guide line behind any of the shapes: the dots alone make the ring, the spiral and the lanes (Ripple's rippled line is the shape itself)
 
-      const dirw = st.w >= 0 ? 1 : -1, streak = Math.min(Math.abs(st.w) * 0.045, 0.75), r0 = dotSize(DOTS)
+      const r0 = dotSize(DOTS)
       // one dot in the chosen shape, centred at (x, y) and pointing outward along `ang`
       const drawDot = (x: number, y: number, ang: number, r: number, color: string, alpha: number) => {
         const ca = Math.cos(ang), sa = Math.sin(ang)
@@ -547,11 +547,6 @@ export default function Spin() {
         }
         const ang = st.rot + i * st.step
         const r = r0 * (1 + p * 0.65)
-        if (streak > 0.05) { // speed shows as a flat, translucent streak along the ring
-          const tail = ang - dirw * streak
-          ctx.beginPath(); ctx.arc(cx, cy, R, Math.min(ang, tail), Math.max(ang, tail))
-          ctx.strokeStyle = accent; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.globalAlpha = 0.45; ctx.stroke(); ctx.globalAlpha = 1
-        }
         const x = cx + Math.cos(ang) * R, y = cy + Math.sin(ang) * R
         drawDot(x, y, ang, r, accent, 1)
         if (p > 0.02) drawDot(x, y, ang, r, th.ink, p) // a passing detent lights the dot up
