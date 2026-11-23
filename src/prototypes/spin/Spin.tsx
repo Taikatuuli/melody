@@ -12,10 +12,6 @@ const VOICES: Voice[] = ['bowl', 'kalimba', 'marimba', 'drops']
 const BG = '#131318'
 const INK = '#ece9f5'
 const ACCENTS: Record<Voice, string> = { bowl: '#a79fe3', kalimba: '#dcbf90', marimba: '#dc9fac', drops: '#8ab2de' }
-// Seed of Life, built one breath at a time: breath 1 is the centre circle, breaths 2-7 add the six petals (each centred on the
-// first circle's edge, 60 degrees apart). Breath 8 holds the finished pattern, breath 9 fades it, then it starts over.
-const SEED_STEPS = 9
-const SEED_FADE_S = 1.6
 const IN_S = 4, OUT_S = 6 // breath: 4 in, 6 out
 const SESSION_S = Number(new URLSearchParams(location.search).get('s')) || 180
 const FADE_S = 8
@@ -91,7 +87,7 @@ export default function Spin() {
   const s = useRef({
     rot: 0, w: 0.15, dragging: false, lastA: 0, lastT: 0,
     pulse: new Float32Array(N), lastNote: 0, muted: false, voice: 'bowl' as Voice, cyFrac: 0.44, pid: -1, cycleIdx: 0, W: 0, H: 0,
-    circles: [] as { born: number; k: number }[], seedFade: 0, seedOff: 0, breathOn: false, breathT0: 0, ended: false, phase: 'in' as 'in' | 'out',
+    breathOn: false, breathT0: 0, ended: false, phase: 'in' as 'in' | 'out',
   })
 
   const ensureAudio = () => {
@@ -208,7 +204,6 @@ export default function Spin() {
     const st = s.current
     st.breathOn = on; st.ended = false; st.breathT0 = performance.now()
     st.phase = 'in'; st.cycleIdx = 0
-    if (on) { st.circles = [{ born: performance.now(), k: 0 }]; st.seedFade = 0; st.seedOff = 0 } else st.seedOff = performance.now() // first breath draws the centre circle; switching off fades the pattern
     setBreathOn(on); setEnded(false); setPhase('in'); setCycles(0)
     if (on) { ensureAudio(); breathCue(1) }
     const a = audio.current
@@ -280,11 +275,6 @@ export default function Spin() {
         const ci = Math.floor(el / CYC)
         if (ci !== st.cycleIdx) {
           st.cycleIdx = ci; setCycles(ci) // a full breath just completed
-          const step = ci % SEED_STEPS
-          if (!st.ended) {
-            if (step < 7) { if (step === 0) { st.circles = []; st.seedFade = 0 } st.circles.push({ born: now, k: step }) } // grow the next circle
-            else if (step === 8) st.seedFade = now // fade the finished pattern, ready to begin again
-          }
         }
         const a = audio.current
         if (a && !st.ended && !st.muted) a.master.gain.setTargetAtTime(0.55 + 0.45 * b, a.ctx.currentTime, 0.25) // sound swells with the breath
@@ -297,53 +287,6 @@ export default function Spin() {
       if (nz && an) nz.gain.gain.setTargetAtTime(0.012 + Math.min(Math.abs(st.w) / 22, 1) * 0.05 + (st.breathOn ? 0.03 * b : 0), an.ctx.currentTime, 0.15)
       const R = base * (1 + breath * (b - 0.5) * 2)
       const accent = ACCENTS[st.voice]
-
-      if (st.circles.length) { // Seed of Life: seven equal circles, outlined, built one breath at a time
-        const r = R * 0.46
-        const off = st.breathOn ? 1 : Math.max(0, 1 - (now - st.seedOff) / 600)
-        const fade = st.seedFade ? Math.max(0, 1 - (now - st.seedFade) / (SEED_FADE_S * 1000)) : 1
-        if (off <= 0 || fade <= 0) st.circles = []
-        for (const c of st.circles) {
-          // every petal circle passes through the middle dot, so its pen starts there, traces the whole circle clockwise and closes back
-          // on the middle dot. The centre circle doesn't pass through the middle, so its pen goes out to the top, draws, and returns.
-          const Q = c.k === 0 ? 0.12 : 0 // share of the breath spent leaving the middle, and again returning to it
-          const p = Math.min(1, (now - c.born) / ((IN_S + OUT_S) * 1000))
-          const th = -Math.PI / 2 + (c.k - 1) * (Math.PI / 3)
-          const x = c.k === 0 ? cx : cx + Math.cos(th) * r, y = c.k === 0 ? cy : cy + Math.sin(th) * r
-          const p2 = Math.max(0, Math.min(1, (p - Q) / (1 - 2 * Q))) // progress of the circle itself
-          const a0 = c.k === 0 ? -Math.PI / 2 : th + Math.PI // petals start where the circle meets the middle dot
-          const a1 = a0 + p2 * Math.PI * 2
-          const sx = x + Math.cos(a0) * r, sy = y + Math.sin(a0) * r // where the circle starts
-          let px: number, py: number
-          if (p < Q) { const e = ease(p / Q); px = cx + (sx - cx) * e; py = cy + (sy - cy) * e }
-          else if (p < 1 - Q) { px = x + Math.cos(a1) * r; py = y + Math.sin(a1) * r }
-          else if (Q > 0) { const e = ease((p - (1 - Q)) / Q); px = sx + (cx - sx) * e; py = sy + (cy - sy) * e }
-          else { px = cx; py = cy }
-          if (p >= 1) { // finished: faint flat fill where circles overlap
-            ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = accent; ctx.globalAlpha = 0.07 * off * fade; ctx.fill()
-          }
-          if (p2 > 0) { // two-tone line: bright while you breathe in, dim while you breathe out
-            const split = Math.max(0, Math.min(1, (IN_S / (IN_S + OUT_S) - Q) / (1 - 2 * Q))) // where the in-breath ends along the circle
-            const aSplit = a0 + split * Math.PI * 2
-            const settle = Math.max(0, Math.min(1, (now - c.born - (IN_S + OUT_S) * 1000) / 1500)) // after closing, the dim part settles to full
-            ctx.lineWidth = 1.75; ctx.lineCap = 'butt'
-            ctx.beginPath(); ctx.arc(x, y, r, a0, Math.min(a1, aSplit))
-            ctx.strokeStyle = accent; ctx.globalAlpha = 0.95 * off * fade; ctx.stroke()
-            if (a1 > aSplit) {
-              ctx.beginPath(); ctx.arc(x, y, r, aSplit, a1)
-              ctx.strokeStyle = accent; ctx.globalAlpha = (0.32 + 0.58 * settle) * off * fade; ctx.stroke()
-            }
-          }
-          if (p < 1) {
-            if (Q > 0 && (p < Q || p > 1 - Q)) { // a thin leader line shows the centre circle's pen leaving, and returning to, the middle
-              ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(px, py)
-              ctx.strokeStyle = accent; ctx.lineWidth = 1; ctx.globalAlpha = 0.35 * off * fade; ctx.stroke()
-            }
-            ctx.beginPath(); ctx.arc(px, py, 3.5, 0, Math.PI * 2); ctx.fillStyle = INK; ctx.globalAlpha = off * fade; ctx.fill()
-          }
-          ctx.globalAlpha = 1
-        }
-      }
 
       for (let k = 1; k <= 3; k++) { // slow outer dust rings, counter-rotating
         const rk = R * (1 + 0.42 * k), n = 14 + k * 8
