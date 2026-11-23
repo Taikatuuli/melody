@@ -463,25 +463,11 @@ export default function Spin() {
           ctx.beginPath(); ctx.arc(cx + Math.cos(ang) * rk, cy + Math.sin(ang) * rk, 1.7, 0, Math.PI * 2); ctx.fill()
         }
       }
-      ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2)
-      ctx.strokeStyle = th.ring; ctx.lineWidth = 1.5
       // the spiral: five rounds from near the middle out to the edges of the screen, scaled with the breath
       const sMax = (W / 2 - 4) * (R / base), sMin = W * 0.05
       const spiralR = (u: number) => sMin + (sMax - sMin) * u
       const ripple = st.voice === 'ripple'
-      // no guide line behind the ring shapes any more: the shapes alone make the circle (Drops keeps its spiral, Ripple its rippled line)
-      if (spiral) { // a flat line that fades in at the middle and out at the outer end
-        const SEG = 220
-        ctx.lineCap = 'round'
-        for (let i = 1; i <= SEG; i++) {
-          const u0 = (i - 1) / SEG, u1 = i / SEG
-          const t0 = -Math.PI / 2 + u0 * SPIRAL_TURNS * Math.PI * 2, t1 = -Math.PI / 2 + u1 * SPIRAL_TURNS * Math.PI * 2
-          ctx.beginPath(); ctx.moveTo(cx + Math.cos(t0) * spiralR(u0), cy + Math.sin(t0) * spiralR(u0))
-          ctx.lineTo(cx + Math.cos(t1) * spiralR(u1), cy + Math.sin(t1) * spiralR(u1))
-          ctx.globalAlpha = 0.15 + 0.85 * spiralTaper(u1); ctx.stroke()
-        }
-        ctx.globalAlpha = 1
-      }
+      // no guide line behind any of the shapes: the dots alone make the ring, the spiral and the lanes (Ripple's rippled line is the shape itself)
 
       const dirw = st.w >= 0 ? 1 : -1, streak = Math.min(Math.abs(st.w) * 0.045, 0.75), r0 = dotSize(DOTS)
       // one dot in the chosen shape, centred at (x, y) and pointing outward along `ang`
