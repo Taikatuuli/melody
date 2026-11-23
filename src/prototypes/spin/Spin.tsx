@@ -486,7 +486,7 @@ export default function Spin() {
 
   const poke = () => setPokeTick((n) => n + 1)
   const stop = (e: React.PointerEvent) => { e.stopPropagation(); poke() }
-  const hintBottom = 230
+  const hintBottom = 190
 
   // keyboard access to the spinner itself: arrows spin it, space adds a tone
   const onKey = (e: React.KeyboardEvent) => {
@@ -546,7 +546,7 @@ export default function Spin() {
       {/* sound controls: minimal pills under the spinner, never a modal, so you can change them mid-spin */}
       <div role="group" aria-label="Sound" onPointerDown={stop}
         onPointerMove={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()} onPointerCancel={(e) => e.stopPropagation()}
-        style={{ position: 'absolute', left: 8, right: 8, bottom: 'calc(var(--safe-bottom) + 100px)', maxWidth: 420, margin: '0 auto',
+        style={{ position: 'absolute', left: 8, right: 8, bottom: 'calc(var(--safe-bottom) + 16px)', maxWidth: 420, margin: '0 auto',
           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, color: '#fff',
           opacity: chrome ? 1 : 0.5, transition: 'opacity .6s ease-out' }}>
         {/* choose one: radio pills */}
