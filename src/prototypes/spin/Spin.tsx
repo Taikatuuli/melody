@@ -64,7 +64,7 @@ const VOICE_ICONS: Record<Voice, React.ReactElement> = {
 const LookIcon = () => <svg {...iconProps}><path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.4 0 2-1 1.6-2.1-.4-1.2.3-2.4 1.6-2.4H17a3.5 3.5 0 0 0 3.5-3.6C20.5 7.2 16.8 3.5 12 3.5z" /><circle cx="7.8" cy="11.2" r=".9" fill="currentColor" stroke="none" /><circle cx="10.4" cy="7.4" r=".9" fill="currentColor" stroke="none" /><circle cx="14.8" cy="7.6" r=".9" fill="currentColor" stroke="none" /></svg>
 const iconBtn = (on: boolean): React.CSSProperties => ({
   width: 44, height: 44, display: 'grid', placeItems: 'center', border: 0, borderRadius: 22, color: 'var(--ink)',
-  background: on ? 'var(--pressed)' : 'transparent', transition: 'background .3s, opacity .5s',
+  background: on ? 'var(--pressed)' : 'transparent', transition: 'background .15s ease-out, scale .15s ease-out, opacity .5s',
 })
 const CSS = `
 .sp-root:focus{outline:none}
@@ -76,7 +76,7 @@ fieldset.sp-fs{border:0;margin:0;padding:0;min-width:0}
 .sp-pill{position:relative;display:block;cursor:pointer}
 .sp-pill::after{content:'';position:absolute;inset:-4px} /* 36px pill, 44px touch target */
 .sp-pill input{position:absolute;opacity:0;width:1px;height:1px}
-.sp-pill span{display:flex;align-items:center;gap:7px;height:36px;padding:0 16px;border-radius:999px;font-size:13px;letter-spacing:.3px;text-transform:capitalize;color:var(--pillt);background:var(--pill);border:1px solid var(--pillb);transition:background .25s,color .25s,border-color .25s}
+.sp-pill span{display:flex;align-items:center;gap:7px;height:36px;padding:0 16px;border-radius:999px;font-size:13px;letter-spacing:.3px;text-transform:capitalize;color:var(--pillt);background:var(--pill);border:1px solid var(--pillb);transition:background .15s ease-out,color .15s ease-out,border-color .15s ease-out,scale .15s ease-out}
 .sp-pill input:checked + span{background:var(--accent);color:var(--onaccent);border-color:transparent}
 .sp-pill.vo span{padding:0 10px;gap:5px}
 .sp-pill.sw span{padding:0;width:36px;justify-content:center;background:transparent}
@@ -85,12 +85,14 @@ fieldset.sp-fs{border:0;margin:0;padding:0;min-width:0}
 .sp-sw{width:20px;height:20px;border-radius:50%;display:block}
 .sp-pill.tg span{padding:0 12px;gap:6px}
 .sp-pill.tg input:checked + span{background:var(--pill);color:var(--ink);border-color:var(--ink)}
-.sp-pill.tg span::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--pillt);opacity:.45;transition:background .25s,opacity .25s}
+.sp-pill.tg span::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--pillt);opacity:.45;transition:background .15s ease-out,opacity .15s ease-out}
 .sp-pill.tg input:checked + span::before{background:var(--ink);opacity:1}
 .sp-pill input:focus-visible + span{outline:2px solid var(--ink);outline-offset:2px}
 .sp-row{display:flex;align-items:center;justify-content:center;gap:8px}
 .sp-rowl{width:52px;flex:none;font-size:11px;letter-spacing:1.4px;text-transform:uppercase;color:var(--pillt)}
-@media (prefers-reduced-motion: reduce){.sp-pill span,.sp-pill span::before{transition:none}}
+.sp-pill:active span,.sp-btn:active{scale:.96}
+.sp-root[data-switching] *,.sp-root[data-switching] *::before{transition:none !important}
+@media (prefers-reduced-motion: reduce){.sp-root *,.sp-root *::before{transition-duration:.01ms !important}}
 `
 
 // an independent on/off option: a toggle pill (still a real switch underneath)
@@ -133,6 +135,7 @@ export default function Spin() {
   const [themeId, setThemeId] = useState<ThemeId>(readLook) // restored from the last visit
   const [lookOpen, setLookOpen] = useState(false)
   const theme: Theme = THEMES[themeId]
+  const reduceRef = useRef(false) // prefers-reduced-motion
   const padRef = useRef<{ gain: GainNode; oscs: OscillatorNode[]; lfo: OscillatorNode } | null>(null)
   const noiseRef = useRef<{ gain: GainNode; src: AudioBufferSourceNode } | null>(null)
   const oceanRef = useRef<Layer | null>(null)
@@ -366,6 +369,12 @@ export default function Spin() {
     return () => clearTimeout(t)
   }, [pokeTick])
 
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)'), on = () => { reduceRef.current = mq.matches }
+    on(); mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [])
+
   useEffect(() => { // iOS only unlocks audio on a touch release or click, not on touch down: so wake it on every one of those, anywhere
     const unlock = () => ensureAudio()
     const evs = ['touchend', 'click', 'pointerup', 'keydown'] as const
@@ -405,7 +414,8 @@ export default function Spin() {
       const prevRot = st.rot
       if (!st.dragging) {
         st.w *= Math.exp(-(st.ended ? 1.1 : 0.42) * dt) // long, soft decay; faster when the session ends
-        if (Math.abs(st.w) < (st.ended ? 0.03 : 0.14)) st.w = (st.ended ? 0.03 : 0.14) * (st.w < 0 ? -1 : 1) // never fully stops
+        const floor = st.ended || reduceRef.current ? 0.03 : 0.14 // the idle drift: almost still when motion is reduced
+        if (Math.abs(st.w) < floor) st.w = floor * (st.w < 0 ? -1 : 1) // never fully stops
         st.rot += st.w * dt
       }
       const spiral = st.voice === 'drops'
@@ -425,7 +435,7 @@ export default function Spin() {
       const cx = W / 2, cy = H * st.cyFrac
       const base = Math.min(W, H) * 0.25
       let b = 0.5 + 0.5 * Math.sin(time * 0.9) // idle breathing
-      let breath = 0.035
+      let breath = reduceRef.current ? 0.012 : 0.035
       if (st.breathOn) {
         const el = (now - st.breathT0) / 1000
         const CYC = IN_S + OUT_S // one breath in + one breath out = one full cycle = one full turn of the arc
@@ -433,7 +443,7 @@ export default function Spin() {
         const cycleB = c < IN_S ? ease(c / IN_S) : 1 - ease((c - IN_S) / OUT_S)
         const k = Math.min(1, el / 1.2) // ease out of the idle breathing into the first inhale
         b = b * (1 - k) + cycleB * k
-        breath = 0.12
+        breath = reduceRef.current ? 0.05 : 0.12 // the breath swell stays, but gentler
         const ph = c < IN_S ? 'in' : 'out'
         if (ph !== st.phase) { st.phase = ph; setPhase(ph); breathCue(ph === 'in' ? 1 : -1); navigator.vibrate?.(8) }
         const ci = Math.floor(el / CYC)
@@ -602,6 +612,11 @@ export default function Spin() {
   }
 
   const poke = () => setPokeTick((n) => n + 1)
+  const switchTheme = (id: ThemeId) => { // a theme switch shouldn't fire every colour transition on the page
+    const el = wrap.current
+    if (el) { el.dataset.switching = '1'; requestAnimationFrame(() => requestAnimationFrame(() => { delete el.dataset.switching })) }
+    setThemeId(id)
+  }
   const stop = (e: React.PointerEvent) => { e.stopPropagation(); poke() }
   const hintBottom = 190
 
@@ -619,24 +634,24 @@ export default function Spin() {
       aria-label="Spinner. Arrow keys spin it."
       onKeyDown={onKey} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
       style={{ position: 'fixed', inset: 0, background: 'var(--bg)', overflow: 'hidden', touchAction: 'none', userSelect: 'none',
-        fontFamily: SANS, transition: 'background .35s',
+        fontFamily: SANS,
         ['--bg' as string]: theme.bg, ['--ink' as string]: theme.ink, ['--pill' as string]: theme.pill, ['--pillb' as string]: theme.pillBorder,
         ['--pillt' as string]: theme.pillText, ['--pressed' as string]: theme.pressed, ['--onaccent' as string]: theme.onAccent, ['--accent' as string]: theme.accents[voice] } as React.CSSProperties}>
       <style>{CSS}</style>
       <canvas ref={cvs} aria-hidden="true" style={{ width: '100%', height: '100%', display: 'block' }} />
 
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: `calc(var(--safe-bottom) + ${hintBottom}px)`, textAlign: 'center',
-        color: 'var(--ink)', pointerEvents: 'none', opacity: touched ? 0 : 1, transition: 'opacity 1.2s ease-out, bottom .5s' }}>
+        color: 'var(--ink)', pointerEvents: 'none', opacity: touched ? 0 : 1, transition: 'opacity .4s ease-out' }}>
         <div style={{ fontSize: 22, fontWeight: 200, letterSpacing: 1 }}>Flick to spin</div>
       </div>
       <div role="status" aria-live="polite" style={{ position: 'absolute', left: 0, right: 0, bottom: `calc(var(--safe-bottom) + ${hintBottom}px)`,
         textAlign: 'center', color: 'var(--ink)', fontSize: 22, fontWeight: 200, letterSpacing: 1, pointerEvents: 'none',
-        opacity: breathOn && !ended ? 0.85 : 0, transition: 'opacity 0.8s ease-out, bottom .5s' }}>
+        opacity: breathOn && !ended ? 0.85 : 0, transition: 'opacity .4s ease-out' }}>
         {breathOn && !ended ? `Breathe ${phase}` : ''}
       </div>
       <div aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, top: 'calc(var(--safe-top) + 22px)', textAlign: 'center',
         color: 'var(--ink)', fontSize: 12, letterSpacing: 2.5, textTransform: 'uppercase', pointerEvents: 'none',
-        opacity: breathOn && !ended ? 0.55 : 0, transition: 'opacity .8s ease-out' }}>{cycles} {cycles === 1 ? 'breath' : 'breaths'}</div>
+        opacity: breathOn && !ended ? 0.55 : 0, transition: 'opacity .4s ease-out' }}>{cycles} {cycles === 1 ? 'breath' : 'breaths'}</div>
       <div aria-hidden={!ended} style={{ position: 'absolute', inset: 0, background: 'var(--bg)', pointerEvents: 'none',
         opacity: ended ? 0.94 : 0, transition: `opacity ${FADE_S}s ease-in-out`, display: 'grid', placeItems: 'center' }}>
         <div style={{ color: 'var(--ink)', fontSize: 22, fontWeight: 200, letterSpacing: 1, opacity: ended ? 0.7 : 0,
@@ -706,7 +721,7 @@ export default function Spin() {
             <div className="sp-pills">
               {THEME_IDS.map((id) => (
                 <label key={id} className="sp-pill sw">
-                  <input type="radio" name="theme" value={id} checked={themeId === id} onChange={() => setThemeId(id)} />
+                  <input type="radio" name="theme" value={id} checked={themeId === id} onChange={() => switchTheme(id)} />
                   <span><i className="sp-sw" style={{ background: `linear-gradient(90deg, ${THEMES[id].bg} 50%, ${THEMES[id].accents.bowl} 50%)`,
                     boxShadow: `inset 0 0 0 1px ${THEMES[id].pillBorder}` }} /><b className="sp-vh">{THEMES[id].name}</b></span>
                 </label>
