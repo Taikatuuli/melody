@@ -12,9 +12,10 @@ const VOICES: Voice[] = ['bowl', 'kalimba', 'marimba', 'drops']
 const BG = '#131318'
 const INK = '#ece9f5'
 const ACCENTS: Record<Voice, string> = { bowl: '#a79fe3', kalimba: '#dcbf90', marimba: '#dc9fac', drops: '#8ab2de' }
-// every breath gives birth to one sphere at the centre; four are alive at once, each in the next colour of a repeating set of four
-const SPHERES = 4
-const SPHERE_COLORS = ['#38364b', '#453e36', '#45363d', '#313b49'] // matte tints of the four instrument accents
+// Seed of Life, built one breath at a time: breath 1 is the centre circle, breaths 2-7 add the six petals (each centred on the
+// first circle's edge, 60 degrees apart). Breath 8 holds the finished pattern, breath 9 fades it, then it starts over.
+const SEED_STEPS = 9
+const SEED_FADE_S = 1.6
 const IN_S = 4, OUT_S = 6 // breath: 4 in, 6 out
 const SESSION_S = Number(new URLSearchParams(location.search).get('s')) || 180
 const FADE_S = 8
@@ -90,7 +91,7 @@ export default function Spin() {
   const s = useRef({
     rot: 0, w: 0.15, dragging: false, lastA: 0, lastT: 0,
     pulse: new Float32Array(N), lastNote: 0, muted: false, voice: 'bowl' as Voice, cyFrac: 0.44, pid: -1, cycleIdx: 0, flash: 0, W: 0, H: 0,
-    spheres: [] as { born: number; c: number }[], sphereN: 0, sphereOff: 0, breathOn: false, breathT0: 0, ended: false, phase: 'in' as 'in' | 'out',
+    circles: [] as { born: number; k: number }[], seedFade: 0, seedOff: 0, breathOn: false, breathT0: 0, ended: false, phase: 'in' as 'in' | 'out',
   })
 
   const ensureAudio = () => {
@@ -207,7 +208,7 @@ export default function Spin() {
     const st = s.current
     st.breathOn = on; st.ended = false; st.breathT0 = performance.now()
     st.phase = 'in'; st.cycleIdx = 0; st.flash = 0
-    if (on) { st.spheres = [{ born: performance.now(), c: 0 }]; st.sphereN = 1; st.sphereOff = 0 } else st.sphereOff = performance.now() // first breath, first sphere; switching off lets them fade
+    if (on) { st.circles = [{ born: performance.now(), k: 0 }]; st.seedFade = 0; st.seedOff = 0 } else st.seedOff = performance.now() // first breath draws the centre circle; switching off fades the pattern
     setBreathOn(on); setEnded(false); setPhase('in'); setCycles(0)
     if (on) { ensureAudio(); breathCue(1) }
     const a = audio.current
@@ -280,7 +281,11 @@ export default function Spin() {
         const ci = Math.floor(el / CYC)
         if (ci !== st.cycleIdx) {
           st.cycleIdx = ci; st.flash = 1; setCycles(ci) // a full breath just completed
-          if (!st.ended) { st.spheres.push({ born: now, c: st.sphereN % SPHERES }); st.sphereN++ } // ...and the next breath's sphere is born at the centre
+          const step = ci % SEED_STEPS
+          if (!st.ended) {
+            if (step < 7) { if (step === 0) { st.circles = []; st.seedFade = 0 } st.circles.push({ born: now, k: step }) } // grow the next circle
+            else if (step === 8) st.seedFade = now // fade the finished pattern, ready to begin again
+          }
         }
         const a = audio.current
         if (a && !st.ended && !st.muted) a.master.gain.setTargetAtTime(0.55 + 0.45 * b, a.ctx.currentTime, 0.25) // sound swells with the breath
@@ -294,15 +299,20 @@ export default function Spin() {
       const R = base * (1 + breath * (b - 0.5) * 2)
       const accent = ACCENTS[st.voice]
 
-      if (st.spheres.length) { // breath spheres: nested flat discs, oldest (largest) at the back
-        const life = SPHERES * (IN_S + OUT_S) * 1000
-        const off = st.breathOn ? 1 : Math.max(0, 1 - (now - st.sphereOff) / 600)
-        st.spheres = st.spheres.filter((sp) => now - sp.born < life && off > 0)
-        for (const sp of st.spheres) {
-          const p = (now - sp.born) / life
-          const rad = R * 0.9 * ease(Math.min(1, p)) * (1 + 0.03 * (b - 0.5))
-          ctx.beginPath(); ctx.arc(cx, cy, Math.max(1.5, rad), 0, Math.PI * 2)
-          ctx.fillStyle = SPHERE_COLORS[sp.c]; ctx.globalAlpha = (p > 0.9 ? (1 - p) / 0.1 : 1) * off; ctx.fill(); ctx.globalAlpha = 1
+      if (st.circles.length) { // Seed of Life: seven equal circles, outlined, built one breath at a time
+        const r = R * 0.46
+        const off = st.breathOn ? 1 : Math.max(0, 1 - (now - st.seedOff) / 600)
+        const fade = st.seedFade ? Math.max(0, 1 - (now - st.seedFade) / (SEED_FADE_S * 1000)) : 1
+        if (off <= 0 || fade <= 0) st.circles = []
+        for (const c of st.circles) {
+          const age = (now - c.born) / 1000, t = ease(Math.min(1, age / IN_S)) // each circle expands from the centre over its inhale
+          const th = -Math.PI / 2 + (c.k - 1) * (Math.PI / 3)
+          const x = c.k === 0 ? cx : cx + Math.cos(th) * r * t, y = c.k === 0 ? cy : cy + Math.sin(th) * r * t
+          ctx.beginPath(); ctx.arc(x, y, Math.max(1, r * t), 0, Math.PI * 2)
+          ctx.fillStyle = accent; ctx.globalAlpha = 0.07 * off * fade; ctx.fill() // faint flat fill shows where circles overlap
+          ctx.strokeStyle = accent; ctx.lineWidth = 1.75; ctx.globalAlpha = 0.9 * off * fade; ctx.stroke()
+          if (age < IN_S) { ctx.strokeStyle = INK; ctx.globalAlpha = (1 - age / IN_S) * 0.8 * off * fade; ctx.stroke() } // the newest circle starts bright
+          ctx.globalAlpha = 1
         }
       }
 
