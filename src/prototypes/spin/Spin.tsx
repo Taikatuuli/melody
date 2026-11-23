@@ -121,7 +121,6 @@ export default function Spin() {
   const theme: Theme = THEMES[themeId]
   const padRef = useRef<{ gain: GainNode; oscs: OscillatorNode[]; lfo: OscillatorNode } | null>(null)
   const noiseRef = useRef<{ gain: GainNode; src: AudioBufferSourceNode } | null>(null)
-  const swirlRef = useRef<{ gain: GainNode; bp: BiquadFilterNode } | null>(null) // Drops: a whoosh that follows the spin
 
   const s = useRef({
     rot: 0, w: 0.15, dragging: false, lastA: 0, lastT: 0,
@@ -262,7 +261,7 @@ export default function Spin() {
 
   useEffect(() => () => { // leaving the route must stop all sound
     const a = audio.current
-    audio.current = null; padRef.current = null; noiseRef.current = null; swirlRef.current = null
+    audio.current = null; padRef.current = null; noiseRef.current = null
     if (a) void a.ctx.close()
   }, [])
 
@@ -332,23 +331,6 @@ export default function Spin() {
       }
       const nz = noiseRef.current, an = audio.current
       if (nz && an) nz.gain.gain.setTargetAtTime(0.012 + Math.min(Math.abs(st.w) / 22, 1) * 0.05 + (st.breathOn ? 0.03 * b : 0), an.ctx.currentTime, 0.15)
-      // Drops' swirl: soft filtered noise that gets louder and brighter the faster the spiral turns, and fades as it slows
-      if (an && spiral && !swirlRef.current) {
-        const buf = an.ctx.createBuffer(1, an.ctx.sampleRate * 2, an.ctx.sampleRate)
-        const d = buf.getChannelData(0); let y = 0
-        for (let i = 0; i < d.length; i++) { y += 0.22 * ((Math.random() * 2 - 1) - y); d[i] = y * 2.6 }
-        const src = an.ctx.createBufferSource(); src.buffer = buf; src.loop = true
-        const bp = an.ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 400; bp.Q.value = 0.9
-        const gain = an.ctx.createGain(); gain.gain.value = 0
-        src.connect(bp); bp.connect(gain); gain.connect(an.master); src.start()
-        swirlRef.current = { gain, bp }
-      }
-      const sw = swirlRef.current
-      if (sw && an) {
-        const v = spiral ? Math.min(Math.abs(st.w) / 18, 1) : 0
-        sw.gain.gain.setTargetAtTime(v ** 1.3 * 0.16, an.ctx.currentTime, 0.12)
-        sw.bp.frequency.setTargetAtTime(320 + Math.abs(st.w) * 70, an.ctx.currentTime, 0.12)
-      }
       const R = base * (1 + breath * (b - 0.5) * 2)
       const accent = th.accents[st.voice]
 
