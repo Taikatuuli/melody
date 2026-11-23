@@ -12,6 +12,9 @@ const VOICES: Voice[] = ['bowl', 'kalimba', 'marimba', 'drops']
 const BG = '#131318'
 const INK = '#ece9f5'
 const ACCENTS: Record<Voice, string> = { bowl: '#a79fe3', kalimba: '#dcbf90', marimba: '#dc9fac', drops: '#8ab2de' }
+// every breath gives birth to one sphere at the centre; four are alive at once, each in the next colour of a repeating set of four
+const SPHERES = 4
+const SPHERE_COLORS = ['#38364b', '#453e36', '#45363d', '#313b49'] // matte tints of the four instrument accents
 const IN_S = 4, OUT_S = 6 // breath: 4 in, 6 out
 const SESSION_S = Number(new URLSearchParams(location.search).get('s')) || 180
 const FADE_S = 8
@@ -87,7 +90,7 @@ export default function Spin() {
   const s = useRef({
     rot: 0, w: 0.15, dragging: false, lastA: 0, lastT: 0,
     pulse: new Float32Array(N), lastNote: 0, muted: false, voice: 'bowl' as Voice, cyFrac: 0.44, pid: -1, cycleIdx: 0, flash: 0, W: 0, H: 0,
-    breathOn: false, breathT0: 0, ended: false, phase: 'in' as 'in' | 'out',
+    spheres: [] as { born: number; c: number }[], sphereN: 0, sphereOff: 0, breathOn: false, breathT0: 0, ended: false, phase: 'in' as 'in' | 'out',
   })
 
   const ensureAudio = () => {
@@ -204,6 +207,7 @@ export default function Spin() {
     const st = s.current
     st.breathOn = on; st.ended = false; st.breathT0 = performance.now()
     st.phase = 'in'; st.cycleIdx = 0; st.flash = 0
+    if (on) { st.spheres = [{ born: performance.now(), c: 0 }]; st.sphereN = 1; st.sphereOff = 0 } else st.sphereOff = performance.now() // first breath, first sphere; switching off lets them fade
     setBreathOn(on); setEnded(false); setPhase('in'); setCycles(0)
     if (on) { ensureAudio(); breathCue(1) }
     const a = audio.current
@@ -274,7 +278,10 @@ export default function Spin() {
         const ph = c < IN_S ? 'in' : 'out'
         if (ph !== st.phase) { st.phase = ph; setPhase(ph); breathCue(ph === 'in' ? 1 : -1); navigator.vibrate?.(8) }
         const ci = Math.floor(el / CYC)
-        if (ci !== st.cycleIdx) { st.cycleIdx = ci; st.flash = 1; setCycles(ci) } // a full breath just completed
+        if (ci !== st.cycleIdx) {
+          st.cycleIdx = ci; st.flash = 1; setCycles(ci) // a full breath just completed
+          if (!st.ended) { st.spheres.push({ born: now, c: st.sphereN % SPHERES }); st.sphereN++ } // ...and the next breath's sphere is born at the centre
+        }
         const a = audio.current
         if (a && !st.ended && !st.muted) a.master.gain.setTargetAtTime(0.55 + 0.45 * b, a.ctx.currentTime, 0.25) // sound swells with the breath
         if (!st.ended && el > SESSION_S) {
@@ -286,6 +293,18 @@ export default function Spin() {
       if (nz && an) nz.gain.gain.setTargetAtTime(0.012 + Math.min(Math.abs(st.w) / 22, 1) * 0.05 + (st.breathOn ? 0.03 * b : 0), an.ctx.currentTime, 0.15)
       const R = base * (1 + breath * (b - 0.5) * 2)
       const accent = ACCENTS[st.voice]
+
+      if (st.spheres.length) { // breath spheres: nested flat discs, oldest (largest) at the back
+        const life = SPHERES * (IN_S + OUT_S) * 1000
+        const off = st.breathOn ? 1 : Math.max(0, 1 - (now - st.sphereOff) / 600)
+        st.spheres = st.spheres.filter((sp) => now - sp.born < life && off > 0)
+        for (const sp of st.spheres) {
+          const p = (now - sp.born) / life
+          const rad = R * 0.9 * ease(Math.min(1, p)) * (1 + 0.03 * (b - 0.5))
+          ctx.beginPath(); ctx.arc(cx, cy, Math.max(1.5, rad), 0, Math.PI * 2)
+          ctx.fillStyle = SPHERE_COLORS[sp.c]; ctx.globalAlpha = (p > 0.9 ? (1 - p) / 0.1 : 1) * off; ctx.fill(); ctx.globalAlpha = 1
+        }
+      }
 
       for (let k = 1; k <= 3; k++) { // slow outer dust rings, counter-rotating
         const rk = R * (1 + 0.42 * k), n = 14 + k * 8
