@@ -381,9 +381,13 @@ export default function Spin() {
       }
       for (let i = 0; i < N; i++) {
         const p = st.pulse[i]
-        if (spiral) { // small dots travel along the spiral: spin one way and they wind outward, the other and they wind in
-          const u = ((i / N + st.rot / (Math.PI * 2 * SPIRAL_TURNS)) % 1 + 1) % 1, tp = spiralTaper(u)
-          const th2 = -Math.PI / 2 + u * SPIRAL_TURNS * Math.PI * 2, rr = spiralR(u)
+        if (spiral) { // each round of the spiral is its own lane of dots, and neighbouring rounds turn in opposite directions
+          const lane = Math.floor(i / DOTS), j = i % DOTS, dir = lane % 2 ? -1 : 1
+          const f = (((j / DOTS + dir * st.rot / (Math.PI * 2)) % 1) + 1) % 1 // how far round this lane the dot is
+          const u = (lane + f) / SPIRAL_TURNS
+          const th2 = -Math.PI / 2 + f * Math.PI * 2, rr = spiralR(u)
+          const seam = Math.min(1, f / 0.07, (1 - f) / 0.07) // dots fade where a lane's end meets its start, so the hop between rounds is hidden
+          const tp = spiralTaper(u) * seam
           const x = cx + Math.cos(th2) * rr, y = cy + Math.sin(th2) * rr, r = 3.3 * (1 + p * 0.7) * (0.35 + 0.65 * tp)
           drawDot(x, y, th2, r, accent, tp)
           if (p > 0.02) drawDot(x, y, th2, r, th.ink, p * tp)
