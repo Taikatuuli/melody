@@ -90,7 +90,7 @@ export default function Spin() {
 
   const s = useRef({
     rot: 0, w: 0.15, dragging: false, lastA: 0, lastT: 0,
-    pulse: new Float32Array(N), lastNote: 0, muted: false, voice: 'bowl' as Voice, cyFrac: 0.44, pid: -1, cycleIdx: 0, flash: 0, W: 0, H: 0,
+    pulse: new Float32Array(N), lastNote: 0, muted: false, voice: 'bowl' as Voice, cyFrac: 0.44, pid: -1, cycleIdx: 0, W: 0, H: 0,
     circles: [] as { born: number; k: number }[], seedFade: 0, seedOff: 0, breathOn: false, breathT0: 0, ended: false, phase: 'in' as 'in' | 'out',
   })
 
@@ -207,7 +207,7 @@ export default function Spin() {
   const setBreath = (on: boolean) => {
     const st = s.current
     st.breathOn = on; st.ended = false; st.breathT0 = performance.now()
-    st.phase = 'in'; st.cycleIdx = 0; st.flash = 0
+    st.phase = 'in'; st.cycleIdx = 0
     if (on) { st.circles = [{ born: performance.now(), k: 0 }]; st.seedFade = 0; st.seedOff = 0 } else st.seedOff = performance.now() // first breath draws the centre circle; switching off fades the pattern
     setBreathOn(on); setEnded(false); setPhase('in'); setCycles(0)
     if (on) { ensureAudio(); breathCue(1) }
@@ -266,7 +266,7 @@ export default function Spin() {
       const cx = W / 2, cy = H * st.cyFrac
       const base = Math.min(W, H) * 0.25
       let b = 0.5 + 0.5 * Math.sin(time * 0.9) // idle breathing
-      let breath = 0.035, prog = 0
+      let breath = 0.035
       if (st.breathOn) {
         const el = (now - st.breathT0) / 1000
         const CYC = IN_S + OUT_S // one breath in + one breath out = one full cycle = one full turn of the arc
@@ -275,12 +275,11 @@ export default function Spin() {
         const k = Math.min(1, el / 1.2) // ease out of the idle breathing into the first inhale
         b = b * (1 - k) + cycleB * k
         breath = 0.12
-        prog = c / CYC
         const ph = c < IN_S ? 'in' : 'out'
         if (ph !== st.phase) { st.phase = ph; setPhase(ph); breathCue(ph === 'in' ? 1 : -1); navigator.vibrate?.(8) }
         const ci = Math.floor(el / CYC)
         if (ci !== st.cycleIdx) {
-          st.cycleIdx = ci; st.flash = 1; setCycles(ci) // a full breath just completed
+          st.cycleIdx = ci; setCycles(ci) // a full breath just completed
           const step = ci % SEED_STEPS
           if (!st.ended) {
             if (step < 7) { if (step === 0) { st.circles = []; st.seedFade = 0 } st.circles.push({ born: now, k: step }) } // grow the next circle
@@ -346,21 +345,6 @@ export default function Spin() {
       }
       ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2)
       ctx.strokeStyle = '#33333f'; ctx.lineWidth = 1.5; ctx.stroke()
-
-      if (st.breathOn && !st.ended) { // progress arc around one full breath cycle
-        const a0p = -Math.PI / 2, a1p = a0p + prog * Math.PI * 2, rp = R * 1.14
-        st.flash = Math.max(0, st.flash - dt * 1.6)
-        ctx.beginPath(); ctx.arc(cx, cy, rp, 0, Math.PI * 2) // quiet track: the whole cycle
-        ctx.strokeStyle = '#25252e'; ctx.lineWidth = 3; ctx.stroke()
-        ctx.beginPath(); ctx.arc(cx, cy, rp, a0p, a1p)
-        ctx.strokeStyle = accent; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.stroke()
-        if (st.flash > 0) { // the closed circle thickens for a moment
-          ctx.beginPath(); ctx.arc(cx, cy, rp, 0, Math.PI * 2)
-          ctx.strokeStyle = accent; ctx.lineWidth = 3 + st.flash * 5; ctx.globalAlpha = st.flash; ctx.stroke(); ctx.globalAlpha = 1
-        }
-        ctx.beginPath(); ctx.arc(cx + Math.cos(a1p) * rp, cy + Math.sin(a1p) * rp, 5, 0, Math.PI * 2)
-        ctx.fillStyle = INK; ctx.fill()
-      }
 
       const dirw = st.w >= 0 ? 1 : -1, streak = Math.min(Math.abs(st.w) * 0.045, 0.75)
       for (let i = 0; i < N; i++) {
