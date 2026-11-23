@@ -322,9 +322,17 @@ export default function Spin() {
           if (p >= 1) { // finished: faint flat fill where circles overlap
             ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = accent; ctx.globalAlpha = 0.07 * off * fade; ctx.fill()
           }
-          if (p2 > 0) {
-            ctx.beginPath(); ctx.arc(x, y, r, a0, a1)
-            ctx.strokeStyle = accent; ctx.lineWidth = 1.75; ctx.lineCap = 'round'; ctx.globalAlpha = 0.9 * off * fade; ctx.stroke()
+          if (p2 > 0) { // two-tone line: bright while you breathe in, dim while you breathe out
+            const split = Math.max(0, Math.min(1, (IN_S / (IN_S + OUT_S) - Q) / (1 - 2 * Q))) // where the in-breath ends along the circle
+            const aSplit = a0 + split * Math.PI * 2
+            const settle = Math.max(0, Math.min(1, (now - c.born - (IN_S + OUT_S) * 1000) / 1500)) // after closing, the dim part settles to full
+            ctx.lineWidth = 1.75; ctx.lineCap = 'butt'
+            ctx.beginPath(); ctx.arc(x, y, r, a0, Math.min(a1, aSplit))
+            ctx.strokeStyle = accent; ctx.globalAlpha = 0.95 * off * fade; ctx.stroke()
+            if (a1 > aSplit) {
+              ctx.beginPath(); ctx.arc(x, y, r, aSplit, a1)
+              ctx.strokeStyle = accent; ctx.globalAlpha = (0.32 + 0.58 * settle) * off * fade; ctx.stroke()
+            }
           }
           if (p < 1) {
             if (Q > 0 && (p < Q || p > 1 - Q)) { // a thin leader line shows the centre circle's pen leaving, and returning to, the middle
