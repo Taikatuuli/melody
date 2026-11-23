@@ -81,6 +81,7 @@ fieldset.sp-fs{border:0;margin:0;padding:0;min-width:0}
 .sp-pill.sw input:checked + span{background:transparent;border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
 .sp-pill svg{flex:none}
 .sp-sw{width:20px;height:20px;border-radius:50%;display:block}
+.sp-pill.tg span{padding:0 12px;gap:6px}
 .sp-pill.tg input:checked + span{background:var(--pill);color:var(--ink);border-color:var(--ink)}
 .sp-pill.tg span::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--pillt);opacity:.45;transition:background .25s,opacity .25s}
 .sp-pill.tg input:checked + span::before{background:var(--ink);opacity:1}
@@ -99,6 +100,14 @@ function TogglePill({ label, checked, onChange }: { label: string; checked: bool
     </label>
   )
 }
+type Layer = { out: GainNode; mod?: GainNode; stop: () => void } // a running background layer
+// a few seconds of loopable noise; `smooth` low-passes it (small = darker, 1 = white)
+const noiseBuffer = (ctx: AudioContext, smooth: number, level: number, seconds: number) => {
+  const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * seconds), ctx.sampleRate)
+  const d = buf.getChannelData(0); let y = 0
+  for (let i = 0; i < d.length; i++) { y += smooth * ((Math.random() * 2 - 1) - y); d[i] = y * level }
+  return buf
+}
 const ease = (x: number) => 0.5 - 0.5 * Math.cos(Math.PI * x) // smooth 0..1
 
 export default function Spin() {
@@ -113,6 +122,9 @@ export default function Spin() {
   const [voice, setVoiceState] = useState<Voice>('bowl')
   const [padOn, setPadOn] = useState(false)
   const [noiseOn, setNoiseOn] = useState(false)
+  const [oceanOn, setOceanOn] = useState(false)
+  const [subOn, setSubOn] = useState(false)
+  const [vinylOn, setVinylOn] = useState(false)
   const [cycles, setCycles] = useState(0)
   const [chrome, setChrome] = useState(true)
   const [pokeTick, setPokeTick] = useState(0)
@@ -121,6 +133,9 @@ export default function Spin() {
   const theme: Theme = THEMES[themeId]
   const padRef = useRef<{ gain: GainNode; oscs: OscillatorNode[]; lfo: OscillatorNode } | null>(null)
   const noiseRef = useRef<{ gain: GainNode; src: AudioBufferSourceNode } | null>(null)
+  const oceanRef = useRef<Layer | null>(null)
+  const subRef = useRef<Layer | null>(null)
+  const vinylRef = useRef<Layer | null>(null)
 
   const s = useRef({
     rot: 0, w: 0.15, dragging: false, lastA: 0, lastT: 0,
@@ -231,6 +246,83 @@ export default function Spin() {
     }
   }
 
+  // Ocean: dark noise that swells and ebbs like waves (and brightens on the crest). In breath mode the swell follows your breathing.
+  const setOcean = (on: boolean) => {
+    const a = audio.current
+    if (!a) return
+    const t = a.ctx.currentTime
+    if (on && !oceanRef.current) {
+      const src = a.ctx.createBufferSource(); src.buffer = noiseBuffer(a.ctx, 0.06, 3.2, 6); src.loop = true
+      const lp = a.ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 520; lp.Q.value = 0.3
+      const swell = a.ctx.createGain(); swell.gain.value = 0.5
+      const lfo = a.ctx.createOscillator(); lfo.frequency.value = 0.09 // a wave about every 11 seconds
+      const lg = a.ctx.createGain(); lg.gain.value = 0.45
+      const lf = a.ctx.createGain(); lf.gain.value = 280
+      lfo.connect(lg); lg.connect(swell.gain); lfo.connect(lf); lf.connect(lp.frequency)
+      const mod = a.ctx.createGain(), out = a.ctx.createGain(); out.gain.value = 0
+      src.connect(lp); lp.connect(swell); swell.connect(mod); mod.connect(out); out.connect(a.master)
+      src.start(); lfo.start(); out.gain.setTargetAtTime(0.1, t, 1.5)
+      oceanRef.current = { out, mod, stop: () => { src.stop(); lfo.stop(); out.disconnect() } }
+    } else if (!on && oceanRef.current) {
+      const o = oceanRef.current; oceanRef.current = null
+      o.out.gain.setTargetAtTime(0, t, 0.8); setTimeout(o.stop, 4000)
+    }
+  }
+
+  // Sub hum: a very low tone with a slow beat, plus a couple of overtones so phone speakers can carry it
+  const setSub = (on: boolean) => {
+    const a = audio.current
+    if (!a) return
+    const t = a.ctx.currentTime
+    if (on && !subRef.current) {
+      const lp = a.ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 260
+      const trem = a.ctx.createGain(); trem.gain.value = 0.85
+      const lfo = a.ctx.createOscillator(); lfo.frequency.value = 0.17
+      const lg = a.ctx.createGain(); lg.gain.value = 0.15
+      lfo.connect(lg); lg.connect(trem.gain)
+      const oscs = ([[55, 1], [55.5, 0.9], [110, 0.5], [165, 0.2]] as const).map(([f, lv]) => {
+        const o = a.ctx.createOscillator(), g = a.ctx.createGain(); o.type = 'sine'; o.frequency.value = f; g.gain.value = lv
+        o.connect(g); g.connect(lp); o.start(); return o
+      })
+      const out = a.ctx.createGain(); out.gain.value = 0
+      lp.connect(trem); trem.connect(out); out.connect(a.master); lfo.start(); out.gain.setTargetAtTime(0.14, t, 1.5)
+      subRef.current = { out, stop: () => { oscs.forEach((o) => o.stop()); lfo.stop(); out.disconnect() } }
+    } else if (!on && subRef.current) {
+      const o = subRef.current; subRef.current = null
+      o.out.gain.setTargetAtTime(0, t, 0.8); setTimeout(o.stop, 4000)
+    }
+  }
+
+  // Vinyl: a faint hiss with random crackle and the odd bigger pop
+  const setVinyl = (on: boolean) => {
+    const a = audio.current
+    if (!a) return
+    const t = a.ctx.currentTime
+    if (on && !vinylRef.current) {
+      const out = a.ctx.createGain(); out.gain.value = 0
+      const hiss = a.ctx.createBufferSource(); hiss.buffer = noiseBuffer(a.ctx, 1, 0.5, 3); hiss.loop = true
+      const hp = a.ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 3200
+      const hg = a.ctx.createGain(); hg.gain.value = 0.012
+      hiss.connect(hp); hp.connect(hg); hg.connect(out); hiss.start()
+      const sr = a.ctx.sampleRate, click = a.ctx.createBuffer(1, Math.floor(sr * 0.014), sr), cd = click.getChannelData(0)
+      for (let i = 0; i < cd.length; i++) cd[i] = (Math.random() * 2 - 1) * Math.exp(-i / (sr * 0.0018)) // a tiny decaying burst = one crackle
+      out.connect(a.master); out.gain.setTargetAtTime(1, t, 1)
+      let timer = 0, alive = true
+      const crackle = () => {
+        if (!alive) return
+        const c = a.ctx.createBufferSource(), g = a.ctx.createGain(); c.buffer = click; c.playbackRate.value = 0.6 + Math.random() * 1.6
+        g.gain.value = Math.random() < 0.12 ? 0.2 + Math.random() * 0.2 : 0.015 + Math.random() * 0.07
+        c.connect(g); g.connect(out); c.start()
+        timer = window.setTimeout(crackle, Math.random() < 0.25 ? 20 + Math.random() * 50 : 90 + Math.random() * 650) // sometimes a quick cluster
+      }
+      crackle()
+      vinylRef.current = { out, stop: () => { alive = false; clearTimeout(timer); hiss.stop(); out.disconnect() } }
+    } else if (!on && vinylRef.current) {
+      const o = vinylRef.current; vinylRef.current = null
+      o.out.gain.setTargetAtTime(0, t, 0.4); setTimeout(o.stop, 2000)
+    }
+  }
+
   // soft tone that rises on the in-breath and falls on the out-breath, so you can follow with your eyes closed
   const breathCue = (dir: 1 | -1) => {
     const a = audio.current
@@ -262,6 +354,7 @@ export default function Spin() {
   useEffect(() => () => { // leaving the route must stop all sound
     const a = audio.current
     audio.current = null; padRef.current = null; noiseRef.current = null
+    vinylRef.current?.stop(); vinylRef.current = null; oceanRef.current = null; subRef.current = null
     if (a) void a.ctx.close()
   }, [])
 
@@ -330,6 +423,8 @@ export default function Spin() {
         }
       }
       const nz = noiseRef.current, an = audio.current
+      const oc = oceanRef.current
+      if (oc?.mod && an) oc.mod.gain.setTargetAtTime(st.breathOn ? 0.45 + 0.55 * b : 1, an.ctx.currentTime, 0.25) // with the breath guide on, the waves rise and fall with your breathing
       if (nz && an) nz.gain.gain.setTargetAtTime(0.012 + Math.min(Math.abs(st.w) / 22, 1) * 0.05 + (st.breathOn ? 0.03 * b : 0), an.ctx.currentTime, 0.15)
       const R = base * (1 + breath * (b - 0.5) * 2)
       const accent = th.accents[st.voice]
@@ -546,6 +641,9 @@ export default function Spin() {
           <div className="sp-pills">
             <TogglePill label="Pad" checked={padOn} onChange={(v) => { ensureAudio(); setTouched(true); setPadOn(v); setPad(v) }} />
             <TogglePill label="Air" checked={noiseOn} onChange={(v) => { ensureAudio(); setTouched(true); setNoiseOn(v); setNoise(v) }} />
+            <TogglePill label="Ocean" checked={oceanOn} onChange={(v) => { ensureAudio(); setTouched(true); setOceanOn(v); setOcean(v) }} />
+            <TogglePill label="Sub" checked={subOn} onChange={(v) => { ensureAudio(); setTouched(true); setSubOn(v); setSub(v) }} />
+            <TogglePill label="Vinyl" checked={vinylOn} onChange={(v) => { ensureAudio(); setTouched(true); setVinylOn(v); setVinyl(v) }} />
           </div>
         </fieldset>
       </div>}
