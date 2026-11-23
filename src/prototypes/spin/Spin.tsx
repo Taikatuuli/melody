@@ -152,7 +152,7 @@ export default function Spin() {
 
   const ensureAudio = () => {
     if (audio.current) {
-      if (audio.current.ctx.state === 'suspended') void audio.current.ctx.resume()
+      if (audio.current.ctx.state !== 'running') void audio.current.ctx.resume()
       return
     }
     const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
@@ -165,11 +165,14 @@ export default function Spin() {
     master.connect(ctx.destination)
     master.connect(delay); delay.connect(fb); fb.connect(delay); delay.connect(wet); wet.connect(ctx.destination)
     audio.current = { ctx, master }
+    const blip = ctx.createBufferSource(); blip.buffer = ctx.createBuffer(1, 1, 22050); blip.connect(ctx.destination); blip.start(0) // a silent blip: the usual trick to unlock iOS audio
+    void ctx.resume()
   }
 
   const note = (tick: number) => {
     const a = audio.current
     if (!a || s.current.muted) return
+    if (a.ctx.state !== 'running') void a.ctx.resume()
     const t = a.ctx.currentTime
     const d = ((tick % 15) + 15) % 15
     const f = 196 * 2 ** ((SCALE[d % 5] + 12 * Math.floor(d / 5)) / 12)
@@ -356,6 +359,16 @@ export default function Spin() {
     return () => clearTimeout(t)
   }, [pokeTick])
 
+  useEffect(() => { // iOS only unlocks audio on a touch release or click, not on touch down: so wake it on every one of those, anywhere
+    const unlock = () => ensureAudio()
+    const evs = ['touchend', 'click', 'pointerup', 'keydown'] as const
+    evs.forEach((e) => window.addEventListener(e, unlock, { passive: true }))
+    const vis = () => { if (!document.hidden) ensureAudio() } // and when you come back to the tab or unlock the phone
+    document.addEventListener('visibilitychange', vis)
+    return () => { evs.forEach((e) => window.removeEventListener(e, unlock)); document.removeEventListener('visibilitychange', vis) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   useEffect(() => () => { // leaving the route must stop all sound
     const a = audio.current
     audio.current = null; padRef.current = null; noiseRef.current = null
@@ -448,7 +461,8 @@ export default function Spin() {
       // the spiral: five rounds from near the middle out to the edges of the screen, scaled with the breath
       const sMax = (W / 2 - 4) * (R / base), sMin = W * 0.05
       const spiralR = (u: number) => sMin + (sMax - sMin) * u
-      if (!spiral) ctx.stroke()
+      const ripple = st.voice === 'musicbox'
+      if (!spiral) { if (!ripple) ctx.stroke() }
       else { // a flat line that fades in at the middle and out at the outer end
         const SEG = 220
         ctx.lineCap = 'round'
@@ -464,7 +478,7 @@ export default function Spin() {
 
       const dirw = st.w >= 0 ? 1 : -1, streak = Math.min(Math.abs(st.w) * 0.045, 0.75), r0 = dotSize(DOTS)
       // one dot in the chosen shape, centred at (x, y) and pointing outward along `ang`
-      const drawDot = (x: number, y: number, ang: number, r: number, color: string, alpha: number, flex = 1) => {
+      const drawDot = (x: number, y: number, ang: number, r: number, color: string, alpha: number) => {
         const ca = Math.cos(ang), sa = Math.sin(ang)
         ctx.globalAlpha = alpha; ctx.fillStyle = color; ctx.strokeStyle = color
         ctx.beginPath()
@@ -475,16 +489,37 @@ export default function Spin() {
           case 'marimba': // thick, shorter bars
             ctx.moveTo(x - ca * r * 1.5, y - sa * r * 1.5); ctx.lineTo(x + ca * r * 1.5, y + sa * r * 1.5)
             ctx.lineWidth = r * 1.4; ctx.lineCap = 'round'; ctx.stroke(); break
-          case 'musicbox': { // a thin arc bowing outward, like a comb tine bent over
-            const tx = -sa, ty = ca, L = r * 1.5
-            ctx.moveTo(x - tx * L, y - ty * L); ctx.quadraticCurveTo(x + ca * r * 1.9 * flex, y + sa * r * 1.9 * flex, x + tx * L, y + ty * L)
-            ctx.lineWidth = Math.max(1.5, r * 0.45); ctx.lineCap = 'round'; ctx.stroke(); break
-          }
           default: ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill() // bowl and drops: plain filled dots
         }
         ctx.globalAlpha = 1
       }
-      for (let i = 0; i < N; i++) {
+      if (ripple) { // the whole ring is a rippled line: one ripple per detent, and the ripple that just sounded is the biggest
+        const amp: number[] = [], glow: number[] = []
+        for (let i = 0; i < N; i++) {
+          const p = st.pulse[i], t = (1 - p) / 1.6 // seconds since this ripple's note played
+          const sounding = p > 0.002
+          const swell = sounding ? (1 - Math.exp(-t * 28)) * Math.exp(-t * 2.4) : 0
+          const wob = sounding ? 1 + 0.3 * Math.exp(-t * 3) * Math.sin(t * Math.PI * 2 * 6) : 1
+          amp[i] = r0 * 0.3 + r0 * 2.6 * swell * wob // every ripple is faintly there; the sounding one swells
+          glow[i] = sounding ? Math.exp(-t * 4.5) * (1 - Math.exp(-t * 45)) : 0
+        }
+        const SEG = 360, pts: { x: number; y: number; g: number }[] = []
+        for (let k = 0; k <= SEG; k++) {
+          const th0 = (k / SEG) * Math.PI * 2, u = (th0 - st.rot) / st.step // position in ripple units: whole numbers are the dot positions
+          const fl = Math.floor(u), f = u - fl, ia = ((fl % N) + N) % N, ib = (ia + 1) % N, sm = f * f * (3 - 2 * f)
+          const A = amp[ia] * (1 - sm) + amp[ib] * sm
+          const rad = R + A * Math.cos(u * Math.PI * 2) // a crest at every dot position
+          pts.push({ x: cx + Math.cos(th0) * rad, y: cy + Math.sin(th0) * rad, g: Math.max(glow[((Math.round(u) % N) + N) % N], 0) })
+        }
+        ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y)
+        for (let k = 1; k <= SEG; k++) ctx.lineTo(pts[k].x, pts[k].y)
+        ctx.strokeStyle = accent; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.stroke()
+        for (let k = 1; k <= SEG; k++) { // the ripple that just sounded lights up
+          const g = (pts[k].g + pts[k - 1].g) / 2
+          if (g > 0.03) { ctx.beginPath(); ctx.moveTo(pts[k - 1].x, pts[k - 1].y); ctx.lineTo(pts[k].x, pts[k].y); ctx.strokeStyle = th.ink; ctx.lineWidth = 2.4; ctx.globalAlpha = g; ctx.stroke(); ctx.globalAlpha = 1 }
+        }
+      }
+      for (let i = 0; i < (ripple ? 0 : N); i++) {
         const p = st.pulse[i]
         if (spiral) { // each round of the spiral is its own lane of dots, and neighbouring rounds turn in opposite directions
           const lane = Math.floor(i / DOTS), j = i % DOTS, dir = lane % 2 ? -1 : 1
@@ -499,22 +534,15 @@ export default function Spin() {
           continue
         }
         const ang = st.rot + i * st.step
-        let r = r0 * (1 + p * 0.65), flex = 1, glow = p
-        if (st.voice === 'musicbox' && p > 0.002) { // a comb tine: eases out to its peak, flexes in a damped wobble, then settles
-          const t = (1 - p) / 1.6 // seconds since this note played
-          const swell = (1 - Math.exp(-t * 28)) * Math.exp(-t * 2.6)
-          r = r0 * (1 + 0.38 * swell)
-          flex = 1 + 0.35 * Math.exp(-t * 4) * Math.sin(t * Math.PI * 2 * 8)
-          glow = Math.exp(-t * 4.5) * (1 - Math.exp(-t * 45))
-        }
+        const r = r0 * (1 + p * 0.65)
         if (streak > 0.05) { // speed shows as a flat, translucent streak along the ring
           const tail = ang - dirw * streak
           ctx.beginPath(); ctx.arc(cx, cy, R, Math.min(ang, tail), Math.max(ang, tail))
           ctx.strokeStyle = accent; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.globalAlpha = 0.45; ctx.stroke(); ctx.globalAlpha = 1
         }
         const x = cx + Math.cos(ang) * R, y = cy + Math.sin(ang) * R
-        drawDot(x, y, ang, r, accent, 1, flex)
-        if (glow > 0.02) drawDot(x, y, ang, r, th.ink, glow, flex) // a passing detent lights the dot up
+        drawDot(x, y, ang, r, accent, 1)
+        if (p > 0.02) drawDot(x, y, ang, r, th.ink, p) // a passing detent lights the dot up
       }
       ctx.beginPath(); ctx.arc(cx, cy, 2.5, 0, Math.PI * 2)
       ctx.fillStyle = th.hub; ctx.fill()
