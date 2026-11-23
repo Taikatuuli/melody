@@ -482,9 +482,14 @@ export default function Spin() {
           case 'marimba': // thick, shorter bars
             ctx.moveTo(x - ca * r * 1.5, y - sa * r * 1.5); ctx.lineTo(x + ca * r * 1.5, y + sa * r * 1.5)
             ctx.lineWidth = r * 1.4; ctx.lineCap = 'round'; ctx.stroke(); break
-          case 'bowl': { // a bowl seen from the side: a half-disc, curved bottom outward, flat rim toward the middle
-            const R = r * 1.55, hx = x - ca * R * 0.4, hy = y - sa * R * 0.4
-            ctx.arc(hx, hy, R, ang - Math.PI / 2, ang + Math.PI / 2); ctx.closePath(); ctx.fill(); break
+          case 'bowl': { // a slim crescent: the profile of a singing bowl, drawn as one fine curved sliver with pointed tips
+            const R = r * 1.55, tx = -sa, ty = ca
+            const cxb = x - ca * R * 0.2, cyb = y - sa * R * 0.2 // sits just outside the middle of the ring
+            const t1x = cxb + tx * R * 0.95, t1y = cyb + ty * R * 0.95, t2x = cxb - tx * R * 0.95, t2y = cyb - ty * R * 0.95
+            ctx.moveTo(t1x, t1y)
+            ctx.quadraticCurveTo(cxb + ca * R * 1.7, cyb + sa * R * 1.7, t2x, t2y) // the outer curve, deep
+            ctx.quadraticCurveTo(cxb + ca * R * 0.8, cyb + sa * R * 0.8, t1x, t1y) // the inner curve, shallower: what is left between them is the sliver
+            ctx.closePath(); ctx.fill(); break
           }
           default: ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill() // drops: plain filled dots
         }
