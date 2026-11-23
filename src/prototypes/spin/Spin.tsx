@@ -305,13 +305,16 @@ export default function Spin() {
         const fade = st.seedFade ? Math.max(0, 1 - (now - st.seedFade) / (SEED_FADE_S * 1000)) : 1
         if (off <= 0 || fade <= 0) st.circles = []
         for (const c of st.circles) {
-          const age = (now - c.born) / 1000, t = ease(Math.min(1, age / IN_S)) // each circle expands from the centre over its inhale
-          const th = -Math.PI / 2 + (c.k - 1) * (Math.PI / 3)
-          const x = c.k === 0 ? cx : cx + Math.cos(th) * r * t, y = c.k === 0 ? cy : cy + Math.sin(th) * r * t
-          ctx.beginPath(); ctx.arc(x, y, Math.max(1, r * t), 0, Math.PI * 2)
-          ctx.fillStyle = accent; ctx.globalAlpha = 0.07 * off * fade; ctx.fill() // faint flat fill shows where circles overlap
-          ctx.strokeStyle = accent; ctx.lineWidth = 1.75; ctx.globalAlpha = 0.9 * off * fade; ctx.stroke()
-          if (age < IN_S) { ctx.strokeStyle = INK; ctx.globalAlpha = (1 - age / IN_S) * 0.8 * off * fade; ctx.stroke() } // the newest circle starts bright
+          const age = (now - c.born) / 1000, u = Math.min(1, age / IN_S), t = 1 - (1 - u) ** 3 // eased 0..1 over the inhale
+          const target = -Math.PI / 2 + (c.k - 1) * (Math.PI / 3)
+          // a full-size circle laps the centre circle's edge once during its inhale, then settles where it belongs
+          const ang = target - (1 - t) * Math.PI * 2
+          const x = c.k === 0 ? cx : cx + Math.cos(ang) * r, y = c.k === 0 ? cy : cy + Math.sin(ang) * r
+          const inA = Math.min(1, age / 1.2) * off * fade // fades in rather than growing
+          ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2)
+          ctx.fillStyle = accent; ctx.globalAlpha = 0.07 * inA; ctx.fill() // faint flat fill shows where circles overlap
+          ctx.strokeStyle = accent; ctx.lineWidth = 1.75; ctx.globalAlpha = 0.9 * inA; ctx.stroke()
+          if (age < IN_S) { ctx.strokeStyle = INK; ctx.globalAlpha = (1 - age / IN_S) * 0.8 * inA; ctx.stroke() } // the travelling circle starts bright
           ctx.globalAlpha = 1
         }
       }
