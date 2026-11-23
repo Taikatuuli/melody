@@ -303,19 +303,22 @@ export default function Spin() {
         const off = st.breathOn ? 1 : Math.max(0, 1 - (now - st.seedOff) / 600)
         const fade = st.seedFade ? Math.max(0, 1 - (now - st.seedFade) / (SEED_FADE_S * 1000)) : 1
         if (off <= 0 || fade <= 0) st.circles = []
-        const Q = 0.12 // share of each breath spent leaving the middle, and again returning to it
         for (const c of st.circles) {
-          // the pen starts at the middle, goes out to the circle's top, draws it clockwise, then comes back to the middle
+          // every petal circle passes through the middle dot, so its pen starts there, traces the whole circle clockwise and closes back
+          // on the middle dot. The centre circle doesn't pass through the middle, so its pen goes out to the top, draws, and returns.
+          const Q = c.k === 0 ? 0.12 : 0 // share of the breath spent leaving the middle, and again returning to it
           const p = Math.min(1, (now - c.born) / ((IN_S + OUT_S) * 1000))
           const th = -Math.PI / 2 + (c.k - 1) * (Math.PI / 3)
           const x = c.k === 0 ? cx : cx + Math.cos(th) * r, y = c.k === 0 ? cy : cy + Math.sin(th) * r
           const p2 = Math.max(0, Math.min(1, (p - Q) / (1 - 2 * Q))) // progress of the circle itself
-          const a0 = -Math.PI / 2, a1 = a0 + p2 * Math.PI * 2
-          const sx = x, sy = y - r // where the circle starts
+          const a0 = c.k === 0 ? -Math.PI / 2 : th + Math.PI // petals start where the circle meets the middle dot
+          const a1 = a0 + p2 * Math.PI * 2
+          const sx = x + Math.cos(a0) * r, sy = y + Math.sin(a0) * r // where the circle starts
           let px: number, py: number
           if (p < Q) { const e = ease(p / Q); px = cx + (sx - cx) * e; py = cy + (sy - cy) * e }
           else if (p < 1 - Q) { px = x + Math.cos(a1) * r; py = y + Math.sin(a1) * r }
-          else { const e = ease((p - (1 - Q)) / Q); px = sx + (cx - sx) * e; py = sy + (cy - sy) * e }
+          else if (Q > 0) { const e = ease((p - (1 - Q)) / Q); px = sx + (cx - sx) * e; py = sy + (cy - sy) * e }
+          else { px = cx; py = cy }
           if (p >= 1) { // finished: faint flat fill where circles overlap
             ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = accent; ctx.globalAlpha = 0.07 * off * fade; ctx.fill()
           }
@@ -324,7 +327,7 @@ export default function Spin() {
             ctx.strokeStyle = accent; ctx.lineWidth = 1.75; ctx.lineCap = 'round'; ctx.globalAlpha = 0.9 * off * fade; ctx.stroke()
           }
           if (p < 1) {
-            if (p < Q || p > 1 - Q) { // a thin leader line shows the pen's trip out of, and back to, the middle
+            if (Q > 0 && (p < Q || p > 1 - Q)) { // a thin leader line shows the centre circle's pen leaving, and returning to, the middle
               ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(px, py)
               ctx.strokeStyle = accent; ctx.lineWidth = 1; ctx.globalAlpha = 0.35 * off * fade; ctx.stroke()
             }
