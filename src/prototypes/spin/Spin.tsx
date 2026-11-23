@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 const DOTS = 24 // shapes on the ring (and detents per turn)
-const SPIRAL_TURNS = 1.6 // Drops lays its dots on a spiral instead of a circle
+const SPIRAL_TURNS = 5 // Drops lays small dots on a big spiral of this many rounds instead of a ring
 const spiralTaper = (u: number) => Math.pow(Math.sin(Math.PI * u), 0.5) // dots shrink and fade at both ends of the spiral
 const SCALE = [0, 2, 4, 7, 9] // major pentatonic: every combination sounds consonant
 const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
@@ -124,7 +124,7 @@ export default function Spin() {
 
   const s = useRef({
     rot: 0, w: 0.15, dragging: false, lastA: 0, lastT: 0,
-    pulse: new Float32Array(DOTS), th: THEMES.mono as Theme, n: DOTS, step: (Math.PI * 2) / DOTS, lastNote: 0, muted: false, voice: 'bowl' as Voice, cyFrac: 0.44, pid: -1, cycleIdx: 0, W: 0, H: 0,
+    pulse: new Float32Array(DOTS * SPIRAL_TURNS), th: THEMES.mono as Theme, n: DOTS, step: (Math.PI * 2) / DOTS, lastNote: 0, muted: false, voice: 'bowl' as Voice, cyFrac: 0.44, pid: -1, cycleIdx: 0, W: 0, H: 0,
     breathOn: false, breathT0: 0, ended: false, phase: 'in' as 'in' | 'out',
   })
 
@@ -290,6 +290,8 @@ export default function Spin() {
         if (Math.abs(st.w) < (st.ended ? 0.03 : 0.14)) st.w = (st.ended ? 0.03 : 0.14) * (st.w < 0 ? -1 : 1) // never fully stops
         st.rot += st.w * dt
       }
+      const spiral = st.voice === 'drops'
+      st.n = spiral ? DOTS * SPIRAL_TURNS : DOTS // same detents per finger-turn either way: the spiral just has more dots on it
       const N = st.n, a0 = Math.floor(prevRot / st.step), a1 = Math.floor(st.rot / st.step)
       if (a1 !== a0) {
         const crossed = Math.min(Math.abs(a1 - a0), N)
@@ -332,7 +334,7 @@ export default function Spin() {
       const R = base * (1 + breath * (b - 0.5) * 2)
       const accent = th.accents[st.voice]
 
-      for (let k = 1; k <= 3; k++) { // slow outer dust rings, counter-rotating
+      for (let k = 1; k <= (spiral ? 0 : 3); k++) { // slow outer dust rings, counter-rotating (the spiral fills the screen, so it has none)
         const rk = R * (1 + 0.42 * k), n = 14 + k * 8
         const rot = st.rot * (k % 2 ? -0.35 : 0.2) / k
         ctx.fillStyle = th.dust[k - 1]
@@ -343,23 +345,26 @@ export default function Spin() {
       }
       ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2)
       ctx.strokeStyle = th.ring; ctx.lineWidth = 1.5
-      const spiral = st.voice === 'drops'
+      // the spiral: five rounds from near the middle out to the edges of the screen, scaled with the breath
+      const sMax = (W / 2 - 4) * (R / base), sMin = W * 0.05
+      const spiralR = (u: number) => sMin + (sMax - sMin) * u
       if (!spiral) ctx.stroke()
-      else { // the base shape is a spiral: it winds out from the middle and fades at both ends
-        ctx.beginPath(); ctx.lineCap = 'round'
-        for (let i = 1; i <= 90; i++) {
-          const u0 = (i - 1) / 90, u1 = i / 90
+      else { // a flat line that fades in at the middle and out at the outer end
+        const SEG = 220
+        ctx.lineCap = 'round'
+        for (let i = 1; i <= SEG; i++) {
+          const u0 = (i - 1) / SEG, u1 = i / SEG
           const t0 = -Math.PI / 2 + u0 * SPIRAL_TURNS * Math.PI * 2, t1 = -Math.PI / 2 + u1 * SPIRAL_TURNS * Math.PI * 2
-          const r0s = R * (0.42 + 0.78 * u0), r1s = R * (0.42 + 0.78 * u1)
-          ctx.beginPath(); ctx.moveTo(cx + Math.cos(t0) * r0s, cy + Math.sin(t0) * r0s); ctx.lineTo(cx + Math.cos(t1) * r1s, cy + Math.sin(t1) * r1s)
-          ctx.globalAlpha = 0.2 + 0.8 * spiralTaper(u1); ctx.stroke()
+          ctx.beginPath(); ctx.moveTo(cx + Math.cos(t0) * spiralR(u0), cy + Math.sin(t0) * spiralR(u0))
+          ctx.lineTo(cx + Math.cos(t1) * spiralR(u1), cy + Math.sin(t1) * spiralR(u1))
+          ctx.globalAlpha = 0.15 + 0.85 * spiralTaper(u1); ctx.stroke()
         }
         ctx.globalAlpha = 1
       }
 
-      const dirw = st.w >= 0 ? 1 : -1, streak = Math.min(Math.abs(st.w) * 0.045, 0.75), r0 = dotSize(N)
+      const dirw = st.w >= 0 ? 1 : -1, streak = Math.min(Math.abs(st.w) * 0.045, 0.75), r0 = dotSize(DOTS)
       // one dot in the chosen shape, centred at (x, y) and pointing outward along `ang`
-      const drawDot = (x: number, y: number, ang: number, r: number, color: string, alpha: number, ph = 0) => {
+      const drawDot = (x: number, y: number, ang: number, r: number, color: string, alpha: number) => {
         const ca = Math.cos(ang), sa = Math.sin(ang)
         ctx.globalAlpha = alpha; ctx.fillStyle = color; ctx.strokeStyle = color
         ctx.beginPath()
@@ -370,30 +375,18 @@ export default function Spin() {
           case 'marimba': // thick, shorter bars
             ctx.moveTo(x - ca * r * 1.5, y - sa * r * 1.5); ctx.lineTo(x + ca * r * 1.5, y + sa * r * 1.5)
             ctx.lineWidth = r * 1.4; ctx.lineCap = 'round'; ctx.stroke(); break
-          case 'drops': { // a small spiral, thick on the outside and tapering into a tight curl, turning slowly
-            const R = r * 2, turns = 1.55, steps = 26, spin = ang + time * 0.5 + ph
-            ctx.lineCap = 'round'
-            let px = 0, py = 0
-            for (let i = 0; i <= steps; i++) {
-              const t = i / steps, th = spin + (1 - t) * turns * Math.PI * 2, rad = R * (0.08 + 0.92 * t)
-              const sx = x + Math.cos(th) * rad, sy = y + Math.sin(th) * rad
-              if (i > 0) { ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(sx, sy); ctx.lineWidth = Math.max(1.3, r * (0.22 + 0.38 * t)); ctx.stroke() }
-              px = sx; py = sy
-            }
-            break
-          }
-          default: ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill() // bowl: a filled circle
+          default: ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill() // bowl and drops: plain filled dots
         }
         ctx.globalAlpha = 1
       }
       for (let i = 0; i < N; i++) {
         const p = st.pulse[i]
-        if (spiral) { // dots travel along the spiral: spin one way and they wind outward, spin the other and they wind in
-          const u = ((i / N + st.rot / (Math.PI * 2)) % 1 + 1) % 1, tp = spiralTaper(u)
-          const th2 = -Math.PI / 2 + u * SPIRAL_TURNS * Math.PI * 2, rr = R * (0.42 + 0.78 * u)
-          const x = cx + Math.cos(th2) * rr, y = cy + Math.sin(th2) * rr, r = r0 * (1 + p * 0.65) * (0.3 + 0.7 * tp)
-          drawDot(x, y, th2, r, accent, tp, i * 0.9)
-          if (p > 0.02) drawDot(x, y, th2, r, th.ink, p * tp, i * 0.9)
+        if (spiral) { // small dots travel along the spiral: spin one way and they wind outward, the other and they wind in
+          const u = ((i / N + st.rot / (Math.PI * 2 * SPIRAL_TURNS)) % 1 + 1) % 1, tp = spiralTaper(u)
+          const th2 = -Math.PI / 2 + u * SPIRAL_TURNS * Math.PI * 2, rr = spiralR(u)
+          const x = cx + Math.cos(th2) * rr, y = cy + Math.sin(th2) * rr, r = 3.3 * (1 + p * 0.7) * (0.35 + 0.65 * tp)
+          drawDot(x, y, th2, r, accent, tp)
+          if (p > 0.02) drawDot(x, y, th2, r, th.ink, p * tp)
           continue
         }
         const ang = st.rot + i * st.step, r = r0 * (1 + p * 0.65)
@@ -403,8 +396,8 @@ export default function Spin() {
           ctx.strokeStyle = accent; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.globalAlpha = 0.45; ctx.stroke(); ctx.globalAlpha = 1
         }
         const x = cx + Math.cos(ang) * R, y = cy + Math.sin(ang) * R
-        drawDot(x, y, ang, r, accent, 1, i * 0.9)
-        if (p > 0.02) drawDot(x, y, ang, r, th.ink, p, i * 0.9) // a passing detent lights the dot up
+        drawDot(x, y, ang, r, accent, 1)
+        if (p > 0.02) drawDot(x, y, ang, r, th.ink, p) // a passing detent lights the dot up
       }
       ctx.beginPath(); ctx.arc(cx, cy, 2.5, 0, Math.PI * 2)
       ctx.fillStyle = th.hub; ctx.fill()
