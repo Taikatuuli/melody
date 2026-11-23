@@ -8,7 +8,16 @@ const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
 type AudioBits = { ctx: AudioContext; master: GainNode }
 type Voice = 'bowl' | 'kalimba' | 'marimba' | 'drops'
 const VOICES: Voice[] = ['bowl', 'kalimba', 'marimba', 'drops']
-type Drone = { x: number; y: number; t0: number; hue: number; gain: GainNode | null; kill: number }
+type Drone = { x: number; y: number; t0: number; hue: number; gain: GainNode | null; kill: number; at: number; life: number; size: number }
+type Timbre = 'warm' | 'choir' | 'bell' | 'breath' | 'sub'
+// attack and total life in seconds, envelope peak, orb size and hue shift per timbre
+const TIMBRES: Record<Timbre, { at: number; life: number; peak: number; size: number; hue: number }> = {
+  warm: { at: 2, life: 16, peak: 0.075, size: 1, hue: 0 },
+  choir: { at: 2.5, life: 14, peak: 0.035, size: 1.15, hue: 30 },
+  bell: { at: 0.02, life: 9, peak: 0.1, size: 0.85, hue: -40 },
+  breath: { at: 3, life: 12, peak: 0.4, size: 1.05, hue: 60 },
+  sub: { at: 3, life: 15, peak: 0.14, size: 1.35, hue: -20 },
+}
 
 const IN_S = 4, OUT_S = 6 // breath: 4 in, 6 out
 const SESSION_S = Number(new URLSearchParams(location.search).get('s')) || 180
@@ -32,12 +41,13 @@ export default function Spin() {
   const [voice, setVoiceState] = useState<Voice>('bowl')
   const [padOn, setPadOn] = useState(false)
   const [noiseOn, setNoiseOn] = useState(false)
+  const noiseBuf = useRef<AudioBuffer | null>(null)
   const padRef = useRef<{ gain: GainNode; oscs: OscillatorNode[]; lfo: OscillatorNode } | null>(null)
   const noiseRef = useRef<{ gain: GainNode; src: AudioBufferSourceNode } | null>(null)
 
   const s = useRef({
     rot: 0, w: 0.15, dragging: false, lastA: 0, lastT: 0,
-    pulse: new Float32Array(N), lastNote: 0, muted: false, voice: 'bowl' as Voice, W: 0, H: 0,
+    pulse: new Float32Array(N), lastNote: 0, muted: false, voice: 'bowl' as Voice, lastTimbre: '' as Timbre | '', lastSemi: -1, W: 0, H: 0,
     drones: [] as Drone[], hue: 200, breathOn: false, breathT0: 0, ended: false, phase: 'in' as 'in' | 'out',
     down: { x: 0, y: 0, t: 0, moved: false },
   })
@@ -142,22 +152,69 @@ export default function Spin() {
 
   const addDrone = (x: number, y: number, hue: number) => {
     const st = s.current, a = audio.current
+    // a different timbre and a different note each tap, never the same twice in a row
+    const pool = (Object.keys(TIMBRES) as Timbre[]).filter((k) => k !== st.lastTimbre)
+    const tb = pool[(Math.random() * pool.length) | 0]; st.lastTimbre = tb
+    const { at, life, peak, size, hue: dh } = TIMBRES[tb]
+    let semi: number
+    do { semi = SCALE[(Math.random() * 5) | 0] + 12 * ((Math.random() * 2) | 0) } while (semi === st.lastSemi)
+    st.lastSemi = semi
+
     let gain: GainNode | null = null
     if (a && !st.muted) {
-      const t = a.ctx.currentTime
-      const semi = SCALE[(Math.random() * 5) | 0] + 12 * ((Math.random() * 2) | 0)
-      const f = 98 * 2 ** (semi / 12)
-      gain = a.ctx.createGain()
-      gain.gain.setValueAtTime(0, t)
-      gain.gain.linearRampToValueAtTime(0.075, t + 2)
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + 16)
-      ;[-3, 3].forEach((c) => {
-        const o = a.ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f; o.detune.value = c
-        o.connect(gain!); o.start(t); o.stop(t + 16.5)
-      })
-      gain.connect(a.master)
+      const t = a.ctx.currentTime, stopAt = t + life + 0.3
+      const base = tb === 'bell' || tb === 'breath' ? 196 : tb === 'sub' ? 65 : 98
+      const f = base * 2 ** (semi / 12)
+      const env = a.ctx.createGain()
+      env.gain.setValueAtTime(0, t)
+      env.gain.linearRampToValueAtTime(peak, t + at)
+      env.gain.exponentialRampToValueAtTime(0.0001, t + life)
+      const osc = (type: OscillatorType, freq: number, dest: AudioNode, detune = 0, level = 1) => {
+        const o = a.ctx.createOscillator(); o.type = type; o.frequency.value = freq; o.detune.value = detune
+        if (level !== 1) { const g = a.ctx.createGain(); g.gain.value = level; o.connect(g); g.connect(dest) } else o.connect(dest)
+        o.start(t); o.stop(stopAt)
+      }
+      switch (tb) {
+        case 'warm': // two slightly detuned sines: a plain, warm hum
+          osc('sine', f, env, -3); osc('sine', f, env, 3)
+          break
+        case 'choir': { // detuned saws through a low filter: a soft, vowel-like pad
+          const lp = a.ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 520; lp.Q.value = 0.7
+          lp.connect(env)
+          osc('sawtooth', f, lp, -8); osc('sawtooth', f, lp, 0); osc('sawtooth', f, lp, 8)
+          break
+        }
+        case 'bell': // struck bell: inharmonic partials, long ring
+          osc('sine', f, env); osc('sine', f * 2.76, env, 0, 0.45); osc('sine', f * 5.4, env, 0, 0.2)
+          break
+        case 'breath': { // narrow band of noise around the pitch: airy, flute-like
+          if (!noiseBuf.current) {
+            const buf = a.ctx.createBuffer(1, a.ctx.sampleRate * 2, a.ctx.sampleRate)
+            const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1
+            noiseBuf.current = buf
+          }
+          const src = a.ctx.createBufferSource(); src.buffer = noiseBuf.current; src.loop = true
+          const bp = a.ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f * 2; bp.Q.value = 14
+          const boost = a.ctx.createGain(); boost.gain.value = 8
+          src.connect(bp); bp.connect(boost); boost.connect(env); src.start(t); src.stop(stopAt)
+          osc('sine', f, env, 0, 0.05)
+          break
+        }
+        case 'sub': { // deep, slowly pulsing: a heartbeat under everything
+          const trem = a.ctx.createGain(); trem.gain.value = 0.7; trem.connect(env)
+          const lfo = a.ctx.createOscillator(); lfo.frequency.value = 0.3
+          const lg = a.ctx.createGain(); lg.gain.value = 0.3
+          lfo.connect(lg); lg.connect(trem.gain); lfo.start(t); lfo.stop(stopAt)
+          osc('sine', f, trem); osc('sine', f * 2, trem, 0, 0.35) // the upper partial lets phone speakers carry it
+          break
+        }
+      }
+      const pan = a.ctx.createStereoPanner?.()
+      if (pan) { pan.pan.value = Math.max(-0.8, Math.min(0.8, ((x / (st.W || 1)) * 2 - 1) * 0.8)); env.connect(pan); pan.connect(a.master) }
+      else env.connect(a.master)
+      gain = env
     }
-    st.drones.push({ x, y, t0: performance.now(), hue, gain, kill: 0 })
+    st.drones.push({ x, y, t0: performance.now(), hue: (hue + dh + 360) % 360, gain, kill: 0, at, life, size })
     if (st.drones.filter((d) => !d.kill).length > 6) {
       const old = st.drones.find((d) => !d.kill)!
       old.kill = performance.now()
@@ -257,10 +314,10 @@ export default function Spin() {
 
       st.drones = st.drones.filter((d) => {
         const age = Math.max(0, (now - d.t0) / 1000)
-        let env = age < 2 ? age / 2 : Math.max(0, 1 - (age - 2) / 14)
+        let env = age < d.at ? age / d.at : Math.max(0, 1 - (age - d.at) / (d.life - d.at))
         if (d.kill) env *= Math.max(0, 1 - (now - d.kill) / 1000)
-        if ((age > 2 || d.kill) && env <= 0.001) { d.gain?.disconnect(); return false }
-        const r = 16 + 14 * env + 3 * Math.sin(time * 1.3 + d.x)
+        if ((age > d.at || d.kill) && env <= 0.001) { d.gain?.disconnect(); return false }
+        const r = (16 + 14 * env + 3 * Math.sin(time * 1.3 + d.x)) * d.size
         const og = ctx.createRadialGradient(d.x, d.y, 0, d.x, d.y, r * 2.2)
         og.addColorStop(0, `hsl(${d.hue} 85% 70% / ${0.35 * env})`); og.addColorStop(1, 'transparent')
         ctx.fillStyle = og; ctx.beginPath(); ctx.arc(d.x, d.y, r * 2.2, 0, Math.PI * 2); ctx.fill()
