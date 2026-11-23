@@ -85,7 +85,6 @@ export default function Spin() {
   const [voice, setVoiceState] = useState<Voice>('bowl')
   const [padOn, setPadOn] = useState(false)
   const [noiseOn, setNoiseOn] = useState(false)
-  const [count, setCount] = useState(0)
   const [cycles, setCycles] = useState(0)
   const [chrome, setChrome] = useState(true)
   const [pokeTick, setPokeTick] = useState(0)
@@ -95,7 +94,7 @@ export default function Spin() {
 
   const s = useRef({
     rot: 0, w: 0.15, dragging: false, lastA: 0, lastT: 0,
-    pulse: new Float32Array(N), lastNote: 0, muted: false, voice: 'bowl' as Voice, lastTimbre: '' as Timbre | '', lastSemi: -1, cyFrac: 0.44, pid: -1, count: 0, cycleIdx: 0, flash: 0, W: 0, H: 0,
+    pulse: new Float32Array(N), lastNote: 0, muted: false, voice: 'bowl' as Voice, lastTimbre: '' as Timbre | '', lastSemi: -1, cyFrac: 0.44, pid: -1, cycleIdx: 0, flash: 0, W: 0, H: 0,
     drones: [] as Drone[], hue: 200, breathOn: false, breathT0: 0, ended: false, phase: 'in' as 'in' | 'out',
     down: { x: 0, y: 0, t: 0, moved: false },
   })
@@ -285,8 +284,8 @@ export default function Spin() {
   const setBreath = (on: boolean) => {
     const st = s.current
     st.breathOn = on; st.ended = false; st.breathT0 = performance.now()
-    st.phase = 'in'; st.cycleIdx = 0; st.flash = 0; st.count = 0
-    setBreathOn(on); setEnded(false); setPhase('in'); setCycles(0); setCount(0)
+    st.phase = 'in'; st.cycleIdx = 0; st.flash = 0
+    setBreathOn(on); setEnded(false); setPhase('in'); setCycles(0)
     if (on) { ensureAudio(); breathCue(1) }
     const a = audio.current
     if (a) a.master.gain.setTargetAtTime(st.muted ? 0 : 0.9, a.ctx.currentTime, 0.3)
@@ -355,8 +354,6 @@ export default function Spin() {
         prog = c / CYC
         const ph = c < IN_S ? 'in' : 'out'
         if (ph !== st.phase) { st.phase = ph; setPhase(ph); breathCue(ph === 'in' ? 1 : -1); navigator.vibrate?.(8) }
-        const n = Math.ceil(c < IN_S ? IN_S - c : CYC - c) // seconds left in this phase
-        if (n !== st.count) { st.count = n; setCount(n) }
         const ci = Math.floor(el / CYC)
         if (ci !== st.cycleIdx) { st.cycleIdx = ci; st.flash = 1; setCycles(ci) } // a full breath just completed
         const a = audio.current
@@ -522,9 +519,6 @@ export default function Spin() {
         opacity: breathOn && !ended ? 0.85 : 0, transition: 'opacity 0.8s ease-out, bottom .5s' }}>
         {breathOn && !ended ? `Breathe ${phase}` : ''}
       </div>
-      <div aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, top: '44%', transform: 'translateY(-50%)', textAlign: 'center',
-        color: '#fff', fontSize: 56, fontWeight: 100, fontVariantNumeric: 'tabular-nums', pointerEvents: 'none',
-        opacity: breathOn && !ended ? 0.8 : 0, transition: 'opacity .8s ease-out' }}>{count || ''}</div>
       <div aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, top: 'calc(var(--safe-top) + 22px)', textAlign: 'center',
         color: '#fff', fontSize: 12, letterSpacing: 2.5, textTransform: 'uppercase', pointerEvents: 'none',
         opacity: breathOn && !ended ? 0.55 : 0, transition: 'opacity .8s ease-out' }}>{cycles} {cycles === 1 ? 'breath' : 'breaths'}</div>
