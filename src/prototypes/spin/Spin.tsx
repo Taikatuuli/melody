@@ -6,11 +6,18 @@ const SCALE = [0, 2, 4, 7, 9] // major pentatonic: every combination sounds cons
 const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
 
 type AudioBits = { ctx: AudioContext; master: GainNode }
+type Voice = 'bowl' | 'kalimba' | 'glass' | 'marimba' | 'drops'
+const VOICES: Voice[] = ['bowl', 'kalimba', 'glass', 'marimba', 'drops']
 type Drone = { x: number; y: number; t0: number; hue: number; gain: GainNode | null; kill: number }
 
 const IN_S = 4, OUT_S = 6 // breath: 4 in, 6 out
 const SESSION_S = Number(new URLSearchParams(location.search).get('s')) || 180
 const FADE_S = 8
+const chip = (on: boolean): React.CSSProperties => ({
+  height: 44, padding: '0 9px', border: 0, background: 'transparent', color: '#fff', opacity: on ? 1 : 0.4,
+  fontSize: 11, letterSpacing: 1.4, textTransform: 'uppercase',
+  boxShadow: on ? 'inset 0 -1px 0 rgba(255,255,255,0.8)' : 'inset 0 -1px 0 transparent',
+})
 const ease = (x: number) => 0.5 - 0.5 * Math.cos(Math.PI * x) // smooth 0..1
 
 export default function Spin() {
@@ -22,10 +29,15 @@ export default function Spin() {
   const [breathOn, setBreathOn] = useState(false)
   const [phase, setPhase] = useState<'in' | 'out'>('in')
   const [ended, setEnded] = useState(false)
+  const [voice, setVoiceState] = useState<Voice>('bowl')
+  const [padOn, setPadOn] = useState(false)
+  const [noiseOn, setNoiseOn] = useState(false)
+  const padRef = useRef<{ gain: GainNode; oscs: OscillatorNode[]; lfo: OscillatorNode } | null>(null)
+  const noiseRef = useRef<{ gain: GainNode; src: AudioBufferSourceNode } | null>(null)
 
   const s = useRef({
     rot: 0, w: 0.15, dragging: false, lastA: 0, lastT: 0,
-    pulse: new Float32Array(N), lastNote: 0, muted: false, W: 0, H: 0,
+    pulse: new Float32Array(N), lastNote: 0, muted: false, voice: 'bowl' as Voice, W: 0, H: 0,
     drones: [] as Drone[], hue: 200, breathOn: false, breathT0: 0, ended: false, phase: 'in' as 'in' | 'out',
     down: { x: 0, y: 0, t: 0, moved: false },
   })
@@ -50,18 +62,85 @@ export default function Spin() {
   const note = (tick: number) => {
     const a = audio.current
     if (!a || s.current.muted) return
-    const now = a.ctx.currentTime
+    const t = a.ctx.currentTime
     const d = ((tick % 15) + 15) % 15
     const f = 196 * 2 ** ((SCALE[d % 5] + 12 * Math.floor(d / 5)) / 12)
-    const mk = (type: OscillatorType, freq: number, peak: number) => {
+    // one partial: oscillator through an attack/decay envelope into the master bus
+    const mk = (type: OscillatorType, freq: number, peak: number, attack: number, decay: number, glideTo?: number) => {
       const o = a.ctx.createOscillator(), g = a.ctx.createGain()
-      o.type = type; o.frequency.value = freq
-      g.gain.setValueAtTime(0, now)
-      g.gain.linearRampToValueAtTime(peak, now + 0.01)
-      g.gain.exponentialRampToValueAtTime(0.0001, now + 1.8)
-      o.connect(g); g.connect(a.master); o.start(now); o.stop(now + 1.9)
+      o.type = type; o.frequency.setValueAtTime(freq, t)
+      if (glideTo) o.frequency.exponentialRampToValueAtTime(glideTo, t + 0.09)
+      g.gain.setValueAtTime(0, t)
+      g.gain.linearRampToValueAtTime(peak, t + attack)
+      g.gain.exponentialRampToValueAtTime(0.0001, t + attack + decay)
+      o.connect(g); g.connect(a.master); o.start(t); o.stop(t + attack + decay + 0.05)
     }
-    mk('sine', f, 0.13); mk('triangle', f * 2, 0.04)
+    switch (s.current.voice) {
+      case 'bowl': // inharmonic partials that decay at different rates = a shimmering, beating tail
+        mk('sine', f, 0.12, 0.01, 3.4); mk('sine', f * 1.003, 0.06, 0.01, 3.4)
+        mk('sine', f * 2.76, 0.04, 0.01, 1.8); mk('sine', f * 5.4, 0.016, 0.01, 0.9)
+        break
+      case 'kalimba': // short plucked attack with a metallic tick on top
+        mk('triangle', f * 2, 0.15, 0.003, 0.9); mk('sine', f * 2 * 5.4, 0.03, 0.002, 0.12)
+        break
+      case 'glass': // pure high sines, slow bloom, long tail
+        mk('sine', f * 2, 0.07, 0.09, 2.8); mk('sine', f * 3, 0.025, 0.12, 2.2)
+        break
+      case 'marimba': // rounded wooden knock with a quick decay
+        mk('sine', f, 0.2, 0.004, 0.55); mk('sine', f * 4, 0.05, 0.002, 0.07)
+        break
+      case 'drops': // pitch glides upward like a water drop
+        mk('sine', f * 1.5, 0.14, 0.004, 0.35, f * 2.4)
+        break
+    }
+  }
+
+  // notes thin out as the ring speeds up, so a fast spin flows instead of machine-gunning
+  const noteGap = () => 70 + Math.min(Math.abs(s.current.w) * 14, 230)
+
+  const setPad = (on: boolean) => {
+    const a = audio.current
+    if (!a) return
+    const t = a.ctx.currentTime
+    if (on && !padRef.current) {
+      const gain = a.ctx.createGain(); gain.gain.value = 0
+      const lp = a.ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 600; lp.Q.value = 0.4
+      const lfo = a.ctx.createOscillator(); lfo.frequency.value = 0.07
+      const lg = a.ctx.createGain(); lg.gain.value = 260
+      lfo.connect(lg); lg.connect(lp.frequency); lfo.start()
+      const oscs = [98, 147, 196.6, 294.5].map((fr, i) => {
+        const o = a.ctx.createOscillator()
+        o.type = i % 2 ? 'triangle' : 'sine'; o.frequency.value = fr; o.detune.value = (i - 1.5) * 4
+        o.connect(lp); o.start(); return o
+      })
+      lp.connect(gain); gain.connect(a.master)
+      gain.gain.setTargetAtTime(0.06, t, 1.5)
+      padRef.current = { gain, oscs, lfo }
+    } else if (!on && padRef.current) {
+      const p = padRef.current; padRef.current = null
+      p.gain.gain.setTargetAtTime(0, t, 0.8)
+      setTimeout(() => { p.oscs.forEach((o) => o.stop()); p.lfo.stop(); p.gain.disconnect() }, 4000)
+    }
+  }
+
+  const setNoise = (on: boolean) => {
+    const a = audio.current
+    if (!a) return
+    const t = a.ctx.currentTime
+    if (on && !noiseRef.current) {
+      const buf = a.ctx.createBuffer(1, a.ctx.sampleRate * 2, a.ctx.sampleRate)
+      const data = buf.getChannelData(0); let y = 0
+      for (let i = 0; i < data.length; i++) { y += 0.08 * ((Math.random() * 2 - 1) - y); data[i] = y * 3.5 } // soft, low-passed noise
+      const src = a.ctx.createBufferSource(); src.buffer = buf; src.loop = true
+      const bp = a.ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 420; bp.Q.value = 0.5
+      const gain = a.ctx.createGain(); gain.gain.value = 0
+      src.connect(bp); bp.connect(gain); gain.connect(a.master); src.start()
+      noiseRef.current = { gain, src }
+    } else if (!on && noiseRef.current) {
+      const n = noiseRef.current; noiseRef.current = null
+      n.gain.gain.setTargetAtTime(0, t, 0.5)
+      setTimeout(() => { n.src.stop(); n.gain.disconnect() }, 2500)
+    }
   }
 
   const addDrone = (x: number, y: number, hue: number) => {
@@ -94,8 +173,14 @@ export default function Spin() {
     st.breathOn = on; st.ended = false; st.breathT0 = performance.now()
     setBreathOn(on); setEnded(false)
     const a = audio.current
-    if (a) a.master.gain.setTargetAtTime(0.9, a.ctx.currentTime, 0.3)
+    if (a) a.master.gain.setTargetAtTime(st.muted ? 0 : 0.9, a.ctx.currentTime, 0.3)
   }
+
+  useEffect(() => () => { // leaving the route must stop all sound
+    const a = audio.current
+    audio.current = null; padRef.current = null; noiseRef.current = null
+    if (a) void a.ctx.close()
+  }, [])
 
   useEffect(() => {
     const st = s.current
@@ -127,7 +212,7 @@ export default function Spin() {
         const crossed = Math.min(Math.abs(a1 - a0), N)
         const dir = a1 > a0 ? 1 : -1
         for (let k = 1; k <= crossed; k++) st.pulse[(((a0 + dir * k) % N) + N) % N] = 1
-        if (now - st.lastNote > 70) { st.lastNote = now; note(a1); navigator.vibrate?.(4) }
+        if (now - st.lastNote > noteGap()) { st.lastNote = now; note(a1); navigator.vibrate?.(4) }
       }
       st.pulse.forEach((_, i) => { st.pulse[i] = Math.max(0, st.pulse[i] - dt * 1.6) })
 
@@ -145,12 +230,14 @@ export default function Spin() {
         const ph = c < IN_S ? 'in' : 'out'
         if (ph !== st.phase) { st.phase = ph; setPhase(ph) }
         const a = audio.current
-        if (a && !st.ended) a.master.gain.setTargetAtTime(0.55 + 0.45 * b, a.ctx.currentTime, 0.25) // sound swells with the breath
+        if (a && !st.ended && !st.muted) a.master.gain.setTargetAtTime(0.55 + 0.45 * b, a.ctx.currentTime, 0.25) // sound swells with the breath
         if (!st.ended && el > SESSION_S) {
           st.ended = true; setEnded(true)
           if (a) a.master.gain.setTargetAtTime(0, a.ctx.currentTime, FADE_S / 4)
         }
       }
+      const nz = noiseRef.current, an = audio.current
+      if (nz && an) nz.gain.gain.setTargetAtTime(0.012 + Math.min(Math.abs(st.w) / 22, 1) * 0.05 + (st.breathOn ? 0.03 * b : 0), an.ctx.currentTime, 0.15)
       const R = base * (1 + breath * (b - 0.5) * 2)
       const hue = (time * 5 + 200) % 360
       st.hue = hue
@@ -231,7 +318,7 @@ export default function Spin() {
     if (a1 !== a0) {
       const dir = a1 > a0 ? 1 : -1
       for (let k = 1; k <= Math.min(Math.abs(a1 - a0), N); k++) st.pulse[(((a0 + dir * k) % N) + N) % N] = 1
-      if (now - st.lastNote > 70) { st.lastNote = now; note(a1); navigator.vibrate?.(4) }
+      if (now - st.lastNote > noteGap()) { st.lastNote = now; note(a1); navigator.vibrate?.(4) }
     }
     st.lastA = a; st.lastT = now
   }
@@ -251,18 +338,20 @@ export default function Spin() {
     e.stopPropagation()
     const m = !s.current.muted
     s.current.muted = m; setMuted(m)
+    const a = audio.current
+    if (a) a.master.gain.setTargetAtTime(m ? 0 : 0.9, a.ctx.currentTime, 0.1) // silences pad and noise too
   }
 
   return (
     <div ref={wrap} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
       style={{ position: 'fixed', inset: 0, background: '#07070b', overflow: 'hidden', touchAction: 'none', userSelect: 'none' }}>
       <canvas ref={cvs} style={{ width: '100%', height: '100%', display: 'block' }} />
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 'calc(var(--safe-bottom) + 150px)', textAlign: 'center',
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 'calc(var(--safe-bottom) + 230px)', textAlign: 'center',
         color: '#fff', fontSize: 13, letterSpacing: 4, textTransform: 'uppercase', pointerEvents: 'none',
         opacity: touched ? 0 : 0.55, transition: 'opacity 1.2s ease-out' }}>
         Flick to spin<div style={{ fontSize: 11, letterSpacing: 3, opacity: 0.7, marginTop: 8 }}>Tap to add a tone</div>
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 'calc(var(--safe-bottom) + 150px)', textAlign: 'center',
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 'calc(var(--safe-bottom) + 230px)', textAlign: 'center',
         color: '#fff', fontSize: 15, letterSpacing: 5, textTransform: 'uppercase', pointerEvents: 'none',
         opacity: breathOn && !ended ? 0.7 : 0, transition: 'opacity 0.8s ease-out' }}>
         Breathe {phase}
@@ -271,6 +360,27 @@ export default function Spin() {
         opacity: ended ? 0.94 : 0, transition: `opacity ${FADE_S}s ease-in-out`, display: 'grid', placeItems: 'center' }}>
         <div style={{ color: '#fff', fontSize: 13, letterSpacing: 6, textTransform: 'uppercase', opacity: ended ? 0.6 : 0,
           transition: `opacity ${FADE_S}s ease-in-out` }}>Rest · tap to continue</div>
+      </div>
+      <div onPointerDown={(e) => e.stopPropagation()}
+        style={{ position: 'absolute', left: 0, right: 0, bottom: 'calc(var(--safe-bottom) + 100px)',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+        <div style={{ display: 'flex', justifyContent: 'center' }}>
+          {VOICES.map((v) => (
+            <button key={v} aria-pressed={voice === v} style={chip(voice === v)}
+              onPointerDown={(e) => {
+                e.stopPropagation(); ensureAudio(); setTouched(true)
+                s.current.voice = v; setVoiceState(v); note(7) // preview the new voice right away
+              }}>{v}</button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'center' }}>
+          <button aria-pressed={padOn} style={chip(padOn)}
+            onPointerDown={(e) => { e.stopPropagation(); ensureAudio(); setTouched(true); const n = !padOn; setPadOn(n); setPad(n) }}>
+            + Pad</button>
+          <button aria-pressed={noiseOn} style={chip(noiseOn)}
+            onPointerDown={(e) => { e.stopPropagation(); ensureAudio(); setTouched(true); const n = !noiseOn; setNoiseOn(n); setNoise(n) }}>
+            + Air</button>
+        </div>
       </div>
       <button onPointerDown={(e) => { e.stopPropagation(); ensureAudio(); setTouched(true); setBreath(!s.current.breathOn) }}
         aria-pressed={breathOn}
