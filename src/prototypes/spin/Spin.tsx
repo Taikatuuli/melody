@@ -6,7 +6,20 @@ const spiralTaper = (u: number) => Math.pow(Math.sin(Math.PI * u), 0.5) // dots 
 const SCALE = [0, 2, 4, 7, 9] // major pentatonic: every combination sounds consonant
 const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
 
-type AudioBits = { ctx: AudioContext; master: GainNode; fb: GainNode } // fb = how much of each echo feeds the next
+type LayerName = 'pad' | 'air' | 'ocean' | 'sub' | 'vinyl'
+const LAYERS: LayerName[] = ['pad', 'air', 'ocean', 'sub', 'vinyl']
+const LAYER_LABELS: Record<LayerName, string> = { pad: 'Pad', air: 'Air', ocean: 'Ocean', sub: 'Sub hum', vinyl: 'Vinyl' }
+const DEFAULT_LEVEL = 0.6 // a layer's volume is 0 to 1; at this level it plays at the loudness it was designed for
+const LEVELS_KEY = 'spin-levels'
+const readLevels = (): Record<LayerName, number> => {
+  const d = { pad: DEFAULT_LEVEL, air: DEFAULT_LEVEL, ocean: DEFAULT_LEVEL, sub: DEFAULT_LEVEL, vinyl: DEFAULT_LEVEL }
+  try {
+    const j = JSON.parse(localStorage.getItem(LEVELS_KEY) || '{}')
+    for (const n of LAYERS) if (typeof j[n] === 'number' && j[n] >= 0 && j[n] <= 1) d[n] = j[n]
+  } catch { /* private mode */ }
+  return d
+}
+type AudioBits = { ctx: AudioContext; master: GainNode; fb: GainNode; bus: Record<LayerName, GainNode> } // fb = how much of each echo feeds the next; bus = one volume knob per layer
 type Voice = 'bowl' | 'kalimba' | 'marimba' | 'drops' | 'ripple'
 const VOICES: Voice[] = ['bowl', 'kalimba', 'marimba', 'drops', 'ripple']
 const VOICE_LABELS: Record<Voice, string> = { bowl: 'Bowl', kalimba: 'Kalimba', marimba: 'Marimba', drops: 'Drops', ripple: 'Ripple' }
@@ -63,6 +76,13 @@ const VOICE_ICONS: Record<Voice, React.ReactElement> = {
 }
 const PanelIcon = () => <svg {...iconProps}><rect x="3.5" y="4.5" width="17" height="15" rx="3" /><path d="M3.5 13.5h17" /><path d="M8 16.5h8" opacity=".6" /></svg>
 const LookIcon = () => <svg {...iconProps}><path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.4 0 2-1 1.6-2.1-.4-1.2.3-2.4 1.6-2.4H17a3.5 3.5 0 0 0 3.5-3.6C20.5 7.2 16.8 3.5 12 3.5z" /><circle cx="7.8" cy="11.2" r=".9" fill="currentColor" stroke="none" /><circle cx="10.4" cy="7.4" r=".9" fill="currentColor" stroke="none" /><circle cx="14.8" cy="7.6" r=".9" fill="currentColor" stroke="none" /></svg>
+const LAYER_ICONS: Record<LayerName, React.ReactElement> = {
+  pad: <svg {...iconProps}><circle cx="9" cy="12" r="5" /><circle cx="15" cy="12" r="5" /></svg>,
+  air: <svg {...iconProps}><path d="M4 8h9M7 12h12M5 16h8" /></svg>,
+  ocean: <svg {...iconProps}><path d="M3 11c2.2-3 4.4-3 6 0s3.8 3 6 0 4-3 6 0" /><path d="M3 16c2.2-3 4.4-3 6 0s3.8 3 6 0 4-3 6 0" opacity=".55" /></svg>,
+  sub: <svg {...iconProps}><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none" /></svg>,
+  vinyl: <svg {...iconProps}><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="2.4" /><path d="M7.2 8.2a6 6 0 0 1 4-2.4" opacity=".6" /></svg>,
+}
 const iconBtn = (on: boolean): React.CSSProperties => ({
   width: 44, height: 44, display: 'grid', placeItems: 'center', border: 0, borderRadius: 22, color: 'var(--ink)',
   background: on ? 'var(--pressed)' : 'transparent', transition: 'background .15s ease-out, scale .15s ease-out, opacity .5s',
@@ -79,16 +99,27 @@ fieldset.sp-fs{border:0;margin:0;padding:0;min-width:0}
 .sp-pill input{position:absolute;opacity:0;width:1px;height:1px}
 .sp-pill span{display:flex;align-items:center;gap:7px;height:36px;padding:0 16px;border-radius:999px;font-size:13px;letter-spacing:.3px;text-transform:capitalize;color:var(--pillt);background:var(--pill);border:1px solid var(--pillb);transition:background .15s ease-out,color .15s ease-out,border-color .15s ease-out,scale .15s ease-out}
 .sp-pill input:checked + span{background:var(--accent);color:var(--onaccent);border-color:transparent}
-.sp-pill.vo span{padding:0 10px;gap:5px}
 .sp-pill.sw span{padding:0;width:36px;justify-content:center;background:transparent}
 .sp-pill.sw input:checked + span{background:transparent;border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
 .sp-pill svg{flex:none}
 .sp-sw{width:20px;height:20px;border-radius:50%;display:block}
-.sp-pill.tg span{padding:0 12px;gap:6px}
-.sp-pill.tg input:checked + span{background:var(--pill);color:var(--ink);border-color:var(--ink)}
-.sp-pill.tg span::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--pillt);opacity:.45;transition:background .15s ease-out,opacity .15s ease-out}
-.sp-pill.tg input:checked + span::before{background:var(--ink);opacity:1}
 .sp-pill input:focus-visible + span{outline:2px solid var(--ink);outline-offset:2px}
+.sp-cap{height:14px;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--pillt);white-space:nowrap}
+.sp-insrow{position:relative;display:flex;gap:8px}
+.sp-ind{position:absolute;left:0;top:0;width:44px;height:44px;border-radius:50%;background:var(--accent);transition:transform .22s cubic-bezier(.32,.72,0,1)}
+.sp-ins{position:relative;display:block;width:44px;height:44px;cursor:pointer}
+.sp-ins input{position:absolute;opacity:0;width:1px;height:1px}
+.sp-ins .ic{position:relative;display:grid;place-items:center;width:44px;height:44px;border-radius:50%;color:var(--pillt);transition:color .15s ease-out,scale .15s ease-out}
+.sp-ins svg{width:20px;height:20px}
+.sp-ins input:checked + .ic{color:var(--onaccent)}
+.sp-ins:active .ic{scale:.96}
+.sp-ins input:focus-visible + .ic{outline:2px solid var(--ink);outline-offset:2px}
+.sp-lay{position:relative;width:44px;height:44px;padding:0;border-radius:50%;border:1px solid var(--pillb);background:var(--pill);color:var(--pillt);display:grid;place-items:center;touch-action:none;cursor:pointer;transition:background .15s ease-out,color .15s ease-out,scale .15s ease-out}
+.sp-lay[aria-checked=true]{color:var(--ink);background:var(--pressed)}
+.sp-lay svg.ic{width:20px;height:20px}
+.sp-lay svg.ring{position:absolute;left:-1px;top:-1px;width:44px;height:44px;pointer-events:none;transform:rotate(-90deg)}
+.sp-lay:active{scale:.96}
+.sp-lay:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 .sp-row{display:flex;align-items:center;justify-content:center;gap:8px}
 .sp-rowl{width:52px;flex:none;font-size:11px;letter-spacing:1.4px;text-transform:uppercase;color:var(--pillt)}
 .sp-pill:active span,.sp-btn:active{scale:.96}
@@ -96,15 +127,6 @@ fieldset.sp-fs{border:0;margin:0;padding:0;min-width:0}
 @media (prefers-reduced-motion: reduce){.sp-root *,.sp-root *::before{transition-duration:.01ms !important}}
 `
 
-// an independent on/off option: a toggle pill (still a real switch underneath)
-function TogglePill({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <label className="sp-pill tg">
-      <input type="checkbox" role="switch" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-      <span>{label}</span>
-    </label>
-  )
-}
 type Layer = { out: GainNode; mod?: GainNode; stop: () => void } // a running background layer
 // a few seconds of loopable noise; `smooth` low-passes it (small = darker, 1 = white)
 const noiseBuffer = (ctx: AudioContext, smooth: number, level: number, seconds: number) => {
@@ -135,6 +157,11 @@ export default function Spin() {
   const [pokeTick, setPokeTick] = useState(0)
   const [themeId, setThemeId] = useState<ThemeId>(readLook) // restored from the last visit
   const [lookOpen, setLookOpen] = useState(false)
+  const levelsRef = useRef<Record<LayerName, number>>(readLevels())
+  const [levels, setLevels] = useState(levelsRef.current)
+  const [caption, setCaption] = useState<string | null>(null) // what the line above the dock says while you're touching a layer
+  const captionTimer = useRef(0)
+  const drag = useRef<{ name: LayerName; y0: number; lvl0: number; moved: boolean } | null>(null)
   const [dockOpen, setDockOpen] = useState(true) // show or hide the instrument, layer and look controls
   const theme: Theme = THEMES[themeId]
   const reduceRef = useRef(false) // prefers-reduced-motion
@@ -166,6 +193,17 @@ export default function Spin() {
     try { localStorage.setItem(LOOK_KEY, JSON.stringify({ theme: themeId })) } catch { /* private mode */ }
   }, [themeId])
 
+  const say = (text: string) => { // show a short note above the dock, and put the instrument's name back a moment later
+    setCaption(text); clearTimeout(captionTimer.current); captionTimer.current = window.setTimeout(() => setCaption(null), 900)
+  }
+  const setLevel = (name: LayerName, v: number) => {
+    const lv = Math.max(0, Math.min(1, v))
+    levelsRef.current = { ...levelsRef.current, [name]: lv }; setLevels(levelsRef.current)
+    const a = audio.current
+    if (a) a.bus[name].gain.setTargetAtTime(lv / DEFAULT_LEVEL, a.ctx.currentTime, 0.05)
+    try { localStorage.setItem(LEVELS_KEY, JSON.stringify(levelsRef.current)) } catch { /* private mode */ }
+  }
+
   const ensureAudio = () => {
     if (audio.current) {
       if (audio.current.ctx.state !== 'running') void audio.current.ctx.resume()
@@ -180,7 +218,9 @@ export default function Spin() {
     const wet = ctx.createGain(); wet.gain.value = 0.38
     master.connect(ctx.destination)
     master.connect(delay); delay.connect(fb); fb.connect(delay); delay.connect(wet); wet.connect(ctx.destination)
-    audio.current = { ctx, master, fb }
+    const bus = {} as Record<LayerName, GainNode>
+    for (const n of LAYERS) { const g = ctx.createGain(); g.gain.value = levelsRef.current[n] / DEFAULT_LEVEL; g.connect(master); bus[n] = g }
+    audio.current = { ctx, master, fb, bus }
     const blip = ctx.createBufferSource(); blip.buffer = ctx.createBuffer(1, 1, 22050); blip.connect(ctx.destination); blip.start(0) // a silent blip: the usual trick to unlock iOS audio
     void ctx.resume()
   }
@@ -247,7 +287,7 @@ export default function Spin() {
         o.type = i % 2 ? 'triangle' : 'sine'; o.frequency.value = fr; o.detune.value = (i - 1.5) * 4
         o.connect(lp); o.start(); return o
       })
-      lp.connect(gain); gain.connect(a.master)
+      lp.connect(gain); gain.connect(a.bus.pad)
       gain.gain.setTargetAtTime(0.06, t, 1.5)
       padRef.current = { gain, oscs, lfo }
     } else if (!on && padRef.current) {
@@ -268,7 +308,7 @@ export default function Spin() {
       const src = a.ctx.createBufferSource(); src.buffer = buf; src.loop = true
       const bp = a.ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 420; bp.Q.value = 0.5
       const gain = a.ctx.createGain(); gain.gain.value = 0
-      src.connect(bp); bp.connect(gain); gain.connect(a.master); src.start()
+      src.connect(bp); bp.connect(gain); gain.connect(a.bus.air); src.start()
       noiseRef.current = { gain, src }
     } else if (!on && noiseRef.current) {
       const n = noiseRef.current; noiseRef.current = null
@@ -291,7 +331,7 @@ export default function Spin() {
       const lf = a.ctx.createGain(); lf.gain.value = 280
       lfo.connect(lg); lg.connect(swell.gain); lfo.connect(lf); lf.connect(lp.frequency)
       const mod = a.ctx.createGain(), out = a.ctx.createGain(); out.gain.value = 0
-      src.connect(lp); lp.connect(swell); swell.connect(mod); mod.connect(out); out.connect(a.master)
+      src.connect(lp); lp.connect(swell); swell.connect(mod); mod.connect(out); out.connect(a.bus.ocean)
       src.start(); lfo.start(); out.gain.setTargetAtTime(0.1, t, 1.5)
       oceanRef.current = { out, mod, stop: () => { src.stop(); lfo.stop(); out.disconnect() } }
     } else if (!on && oceanRef.current) {
@@ -316,7 +356,7 @@ export default function Spin() {
         o.connect(g); g.connect(lp); o.start(); return o
       })
       const out = a.ctx.createGain(); out.gain.value = 0
-      lp.connect(trem); trem.connect(out); out.connect(a.master); lfo.start(); out.gain.setTargetAtTime(0.14, t, 1.5)
+      lp.connect(trem); trem.connect(out); out.connect(a.bus.sub); lfo.start(); out.gain.setTargetAtTime(0.14, t, 1.5)
       subRef.current = { out, stop: () => { oscs.forEach((o) => o.stop()); lfo.stop(); out.disconnect() } }
     } else if (!on && subRef.current) {
       const o = subRef.current; subRef.current = null
@@ -337,7 +377,7 @@ export default function Spin() {
       hiss.connect(hp); hp.connect(hg); hg.connect(out); hiss.start()
       const sr = a.ctx.sampleRate, click = a.ctx.createBuffer(1, Math.floor(sr * 0.014), sr), cd = click.getChannelData(0)
       for (let i = 0; i < cd.length; i++) cd[i] = (Math.random() * 2 - 1) * Math.exp(-i / (sr * 0.0018)) // a tiny decaying burst = one crackle
-      out.connect(a.master); out.gain.setTargetAtTime(1, t, 1)
+      out.connect(a.bus.vinyl); out.gain.setTargetAtTime(1, t, 1)
       let timer = 0, alive = true
       const crackle = () => {
         if (!alive) return
@@ -622,6 +662,43 @@ export default function Spin() {
   }
 
   const poke = () => setPokeTick((n) => n + 1)
+  const layerOn: Record<LayerName, boolean> = { pad: padOn, air: noiseOn, ocean: oceanOn, sub: subOn, vinyl: vinylOn }
+  const layerSet = (name: LayerName, on: boolean) => {
+    ensureAudio(); setTouched(true)
+    if (name === 'pad') { setPadOn(on); setPad(on) }
+    else if (name === 'air') { setNoiseOn(on); setNoise(on) }
+    else if (name === 'ocean') { setOceanOn(on); setOcean(on) }
+    else if (name === 'sub') { setSubOn(on); setSub(on) }
+    else { setVinylOn(on); setVinyl(on) }
+  }
+  // a layer button: tap to switch it on or off; press and drag up or down to set its volume (a drag switches it on)
+  const layerDown = (name: LayerName) => (e: React.PointerEvent) => {
+    e.stopPropagation(); e.currentTarget.setPointerCapture(e.pointerId); poke()
+    drag.current = { name, y0: e.clientY, lvl0: levelsRef.current[name], moved: false }
+  }
+  const layerMove = (e: React.PointerEvent) => {
+    const d = drag.current
+    if (!d) return
+    const dy = d.y0 - e.clientY
+    if (!d.moved && Math.abs(dy) > 8) { d.moved = true; if (!layerOn[d.name]) layerSet(d.name, true) }
+    if (d.moved) { const lv = Math.max(0, Math.min(1, d.lvl0 + dy / 110)); setLevel(d.name, lv); say(`${LAYER_LABELS[d.name]} ${Math.round(lv * 100)}%`) }
+  }
+  const layerUp = (name: LayerName) => () => {
+    const d = drag.current; drag.current = null
+    if (!d) return
+    if (!d.moved) { // a plain tap
+      const on = !layerOn[name]
+      if (on && levelsRef.current[name] < 0.05) setLevel(name, DEFAULT_LEVEL)
+      layerSet(name, on); say(`${LAYER_LABELS[name]} ${on ? 'on' : 'off'}`)
+    }
+  }
+  const layerKey = (name: LayerName) => (e: React.KeyboardEvent) => { // keyboard: arrow up and down change the volume
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+    e.preventDefault(); e.stopPropagation()
+    const lv = Math.max(0, Math.min(1, levelsRef.current[name] + (e.key === 'ArrowUp' ? 0.1 : -0.1)))
+    if (!layerOn[name]) layerSet(name, true)
+    setLevel(name, lv); say(`${LAYER_LABELS[name]} ${Math.round(lv * 100)}%`)
+  }
   // the controls slide up and fade in (250ms, ease-out) and leave a little faster (180ms): they've served their purpose
   const dockMotion = (dim: number): React.CSSProperties => dockOpen
     ? { opacity: chrome ? 1 : dim, transform: 'none', visibility: 'visible', transition: 'transform .25s cubic-bezier(.32,.72,0,1), opacity .3s ease-out' }
@@ -697,36 +774,40 @@ export default function Spin() {
         </div>
       </div>
 
-      {/* sound controls: minimal pills under the spinner, never a modal, so you can change them mid-spin */}
+      {/* sound controls: two compact rows under the spinner, never a modal, so you can change them mid-spin */}
       {!lookOpen && <div id="spin-sound" role="group" aria-label="Sound" onPointerDown={stop}
         onPointerMove={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()} onPointerCancel={(e) => e.stopPropagation()}
         style={{ position: 'absolute', left: 8, right: 8, bottom: 'calc(var(--safe-bottom) + 16px)', maxWidth: 420, margin: '0 auto',
-          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, color: 'var(--ink)',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, color: 'var(--ink)',
           ...dockMotion(0.5) }}>
-        {/* choose one: radio pills */}
+        <div aria-hidden="true" className="sp-cap">{caption ?? VOICE_LABELS[voice]}</div>
+        {/* choose one: round icon buttons, and one highlight that slides to the choice */}
         <fieldset className="sp-fs">
           <legend className="sp-vh">Instrument</legend>
-          <div className="sp-pills">
+          <div className="sp-insrow">
+            <span className="sp-ind" aria-hidden="true" style={{ transform: `translateX(${VOICES.indexOf(voice) * 52}px)` }} />
             {VOICES.map((v) => (
-              <label key={v} className="sp-pill vo">
+              <label key={v} className="sp-ins">
                 <input type="radio" name="voice" value={v} checked={voice === v}
                   onChange={() => { ensureAudio(); setTouched(true); s.current.voice = v; setVoiceState(v); note(7) }} />
-                <span>{VOICE_ICONS[v]}{VOICE_LABELS[v]}</span>
+                <span className="ic">{VOICE_ICONS[v]}<b className="sp-vh">{VOICE_LABELS[v]}</b></span>
               </label>
             ))}
           </div>
         </fieldset>
-        {/* independent on/off: toggle pills */}
-        <fieldset className="sp-fs">
-          <legend className="sp-vh">Layers</legend>
-          <div className="sp-pills">
-            <TogglePill label="Pad" checked={padOn} onChange={(v) => { ensureAudio(); setTouched(true); setPadOn(v); setPad(v) }} />
-            <TogglePill label="Air" checked={noiseOn} onChange={(v) => { ensureAudio(); setTouched(true); setNoiseOn(v); setNoise(v) }} />
-            <TogglePill label="Ocean" checked={oceanOn} onChange={(v) => { ensureAudio(); setTouched(true); setOceanOn(v); setOcean(v) }} />
-            <TogglePill label="Sub" checked={subOn} onChange={(v) => { ensureAudio(); setTouched(true); setSubOn(v); setSub(v) }} />
-            <TogglePill label="Vinyl" checked={vinylOn} onChange={(v) => { ensureAudio(); setTouched(true); setVinylOn(v); setVinyl(v) }} />
-          </div>
-        </fieldset>
+        {/* independent layers: tap to switch on or off, press and drag up or down for volume */}
+        <div role="group" aria-label="Layers" style={{ display: 'flex', gap: 8 }}>
+          {LAYERS.map((n) => (
+            <button key={n} type="button" role="switch" className="sp-lay" aria-checked={layerOn[n]}
+              aria-label={`${LAYER_LABELS[n]}, ${layerOn[n] ? Math.round(levels[n] * 100) + '%' : 'off'}. Arrow up and down change the volume.`}
+              onPointerDown={layerDown(n)} onPointerMove={layerMove} onPointerUp={layerUp(n)} onPointerCancel={() => { drag.current = null }}
+              onKeyDown={layerKey(n)} onClick={(e) => { if (e.detail === 0) { layerSet(n, !layerOn[n]); say(`${LAYER_LABELS[n]} ${layerOn[n] ? 'off' : 'on'}`) } }}>
+              {LAYER_ICONS[n]}
+              {layerOn[n] && <svg className="ring" viewBox="0 0 44 44" aria-hidden="true"><circle cx="22" cy="22" r="20" fill="none" stroke="var(--ink)" strokeWidth="2" strokeLinecap="round"
+                strokeDasharray={`${125.66 * levels[n]} 125.66`} /></svg>}
+            </button>
+          ))}
+        </div>
       </div>}
 
       {/* look controls: the palette. They replace the sound pills while open, so the spinner stays clear */}
