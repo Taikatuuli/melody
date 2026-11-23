@@ -8,15 +8,19 @@ const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
 type AudioBits = { ctx: AudioContext; master: GainNode }
 type Voice = 'bowl' | 'kalimba' | 'marimba' | 'drops'
 const VOICES: Voice[] = ['bowl', 'kalimba', 'marimba', 'drops']
-type Drone = { x: number; y: number; t0: number; hue: number; gain: GainNode | null; kill: number; at: number; life: number; size: number }
+type Drone = { x: number; y: number; t0: number; color: string; gain: GainNode | null; kill: number; at: number; life: number; size: number }
+// flat, matte palette: one background, one ink, one muted accent per instrument
+const BG = '#131318'
+const INK = '#ece9f5'
+const ACCENTS: Record<Voice, string> = { bowl: '#a79fe3', kalimba: '#dcbf90', marimba: '#dc9fac', drops: '#8ab2de' }
 type Timbre = 'warm' | 'choir' | 'bell' | 'breath' | 'sub'
 // attack and total life in seconds, envelope peak, orb size and hue shift per timbre
-const TIMBRES: Record<Timbre, { at: number; life: number; peak: number; size: number; hue: number }> = {
-  warm: { at: 2, life: 16, peak: 0.075, size: 1, hue: 0 },
-  choir: { at: 2.5, life: 14, peak: 0.035, size: 1.15, hue: 30 },
-  bell: { at: 0.02, life: 9, peak: 0.1, size: 0.85, hue: -40 },
-  breath: { at: 3, life: 12, peak: 0.4, size: 1.05, hue: 60 },
-  sub: { at: 3, life: 15, peak: 0.14, size: 1.35, hue: -20 },
+const TIMBRES: Record<Timbre, { at: number; life: number; peak: number; size: number; color: string }> = {
+  warm: { at: 2, life: 16, peak: 0.075, size: 1, color: '#dcbf90' },
+  choir: { at: 2.5, life: 14, peak: 0.035, size: 1.15, color: '#a79fe3' },
+  bell: { at: 0.02, life: 9, peak: 0.1, size: 0.85, color: '#8ab2de' },
+  breath: { at: 3, life: 12, peak: 0.4, size: 1.05, color: '#92bca9' },
+  sub: { at: 3, life: 15, peak: 0.14, size: 1.35, color: '#dc9fac' },
 }
 
 const IN_S = 4, OUT_S = 6 // breath: 4 in, 6 out
@@ -38,8 +42,8 @@ const VOICE_ICONS: Record<Voice, React.ReactElement> = {
   drops: <svg {...vIcon}><path d="M12 3.5c3.6 4.4 6 7.2 6 10a6 6 0 0 1-12 0c0-2.8 2.4-5.6 6-10z" /></svg>,
 }
 const iconBtn = (on: boolean): React.CSSProperties => ({
-  width: 44, height: 44, display: 'grid', placeItems: 'center', border: 0, borderRadius: 22, color: '#fff',
-  background: on ? 'rgba(255,255,255,0.14)' : 'transparent', transition: 'background .3s, opacity .5s',
+  width: 44, height: 44, display: 'grid', placeItems: 'center', border: 0, borderRadius: 22, color: INK,
+  background: on ? '#25252e' : 'transparent', transition: 'background .3s, opacity .5s',
 })
 const CSS = `
 .sp-root:focus{outline:none}
@@ -51,13 +55,13 @@ fieldset.sp-fs{border:0;margin:0;padding:0;min-width:0}
 .sp-pill{position:relative;display:block;cursor:pointer}
 .sp-pill::after{content:'';position:absolute;inset:-4px} /* 36px pill, 44px touch target */
 .sp-pill input{position:absolute;opacity:0;width:1px;height:1px}
-.sp-pill span{display:flex;align-items:center;gap:7px;height:36px;padding:0 16px;border-radius:999px;font-size:13px;letter-spacing:.3px;text-transform:capitalize;color:rgba(255,255,255,.72);background:rgba(12,12,22,.4);border:1px solid rgba(255,255,255,.16);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);transition:background .25s,color .25s,border-color .25s}
-.sp-pill input:checked + span{background:rgba(255,255,255,.92);color:#0b0b14;border-color:transparent}
+.sp-pill span{display:flex;align-items:center;gap:7px;height:36px;padding:0 16px;border-radius:999px;font-size:13px;letter-spacing:.3px;text-transform:capitalize;color:#a3a1b4;background:#1b1b22;border:1px solid #2b2b35;transition:background .25s,color .25s,border-color .25s}
+.sp-pill input:checked + span{background:var(--accent,#ece9f5);color:#131318;border-color:transparent}
 .sp-pill.vo span{padding:0 10px;gap:5px}
 .sp-pill svg{flex:none}
-.sp-pill.tg input:checked + span{background:rgba(169,180,255,.2);color:#fff;border-color:rgba(169,180,255,.7)}
-.sp-pill.tg span::before{content:'';width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.3);transition:background .25s,box-shadow .25s}
-.sp-pill.tg input:checked + span::before{background:#a9b4ff;box-shadow:0 0 8px #a9b4ff}
+.sp-pill.tg input:checked + span{background:#1b1b22;color:#ece9f5;border-color:#ece9f5}
+.sp-pill.tg span::before{content:'';width:6px;height:6px;border-radius:50%;background:#4a4a58;transition:background .25s}
+.sp-pill.tg input:checked + span::before{background:#ece9f5}
 .sp-pill input:focus-visible + span{outline:2px solid #fff;outline-offset:2px}
 @media (prefers-reduced-motion: reduce){.sp-pill span,.sp-pill span::before{transition:none}}
 `
@@ -95,7 +99,7 @@ export default function Spin() {
   const s = useRef({
     rot: 0, w: 0.15, dragging: false, lastA: 0, lastT: 0,
     pulse: new Float32Array(N), lastNote: 0, muted: false, voice: 'bowl' as Voice, lastTimbre: '' as Timbre | '', lastSemi: -1, cyFrac: 0.44, pid: -1, cycleIdx: 0, flash: 0, W: 0, H: 0,
-    drones: [] as Drone[], hue: 200, breathOn: false, breathT0: 0, ended: false, phase: 'in' as 'in' | 'out',
+    drones: [] as Drone[], breathOn: false, breathT0: 0, ended: false, phase: 'in' as 'in' | 'out',
     down: { x: 0, y: 0, t: 0, moved: false },
   })
 
@@ -197,12 +201,12 @@ export default function Spin() {
     }
   }
 
-  const addDrone = (x: number, y: number, hue: number) => {
+  const addDrone = (x: number, y: number) => {
     const st = s.current, a = audio.current
     // a different timbre and a different note each tap, never the same twice in a row
     const pool = (Object.keys(TIMBRES) as Timbre[]).filter((k) => k !== st.lastTimbre)
     const tb = pool[(Math.random() * pool.length) | 0]; st.lastTimbre = tb
-    const { at, life, peak, size, hue: dh } = TIMBRES[tb]
+    const { at, life, peak, size, color } = TIMBRES[tb]
     let semi: number
     do { semi = SCALE[(Math.random() * 5) | 0] + 12 * ((Math.random() * 2) | 0) } while (semi === st.lastSemi)
     st.lastSemi = semi
@@ -261,7 +265,7 @@ export default function Spin() {
       else env.connect(a.master)
       gain = env
     }
-    st.drones.push({ x, y, t0: performance.now(), hue: (hue + dh + 360) % 360, gain, kill: 0, at, life, size })
+    st.drones.push({ x, y, t0: performance.now(), color, gain, kill: 0, at, life, size })
     if (st.drones.filter((d) => !d.kill).length > 6) {
       const old = st.drones.find((d) => !d.kill)!
       old.kill = performance.now()
@@ -317,7 +321,7 @@ export default function Spin() {
       if (canvas.width !== W * dpr || canvas.height !== H * dpr) {
         canvas.width = W * dpr; canvas.height = H * dpr; st.W = W; st.H = H
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-        ctx.fillStyle = '#07070b'; ctx.fillRect(0, 0, W, H)
+        ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H)
       }
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
@@ -337,8 +341,8 @@ export default function Spin() {
       }
       st.pulse.forEach((_, i) => { st.pulse[i] = Math.max(0, st.pulse[i] - dt * 1.6) })
 
-      // ---- draw (translucent fill leaves comet trails at speed)
-      ctx.fillStyle = 'rgba(7,7,11,0.17)'; ctx.fillRect(0, 0, W, H)
+      // ---- draw: flat and matte, solid fills only (no glow, blur, gradients or trails)
+      ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H)
       const cx = W / 2, cy = H * st.cyFrac
       const base = Math.min(W, H) * 0.25
       let b = 0.5 + 0.5 * Math.sin(time * 0.9) // idle breathing
@@ -366,63 +370,60 @@ export default function Spin() {
       const nz = noiseRef.current, an = audio.current
       if (nz && an) nz.gain.gain.setTargetAtTime(0.012 + Math.min(Math.abs(st.w) / 22, 1) * 0.05 + (st.breathOn ? 0.03 * b : 0), an.ctx.currentTime, 0.15)
       const R = base * (1 + breath * (b - 0.5) * 2)
-      const hue = 245 + 75 * Math.sin(time * 0.06) // drifts teal → indigo → magenta; never muddy greens or yellows
-      st.hue = hue
-
-      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 2.1)
-      g.addColorStop(0, `hsl(${hue} 80% 60% / ${0.07 + 0.1 * b})`); g.addColorStop(1, 'transparent')
-      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H)
+      const accent = ACCENTS[st.voice]
 
       for (let k = 1; k <= 3; k++) { // slow outer dust rings, counter-rotating
         const rk = R * (1 + 0.42 * k), n = 14 + k * 8
         const rot = st.rot * (k % 2 ? -0.35 : 0.2) / k
+        ctx.fillStyle = k === 1 ? '#3d3d4a' : k === 2 ? '#31313c' : '#272731'
         for (let i = 0; i < n; i++) {
           const ang = rot + (i / n) * Math.PI * 2
-          ctx.beginPath(); ctx.arc(cx + Math.cos(ang) * rk, cy + Math.sin(ang) * rk, 1.6, 0, Math.PI * 2)
-          ctx.fillStyle = `hsl(${hue + k * 20} 70% 75% / ${0.45 - k * 0.1})`; ctx.fill()
+          ctx.beginPath(); ctx.arc(cx + Math.cos(ang) * rk, cy + Math.sin(ang) * rk, 1.7, 0, Math.PI * 2); ctx.fill()
         }
       }
       ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2)
-      ctx.strokeStyle = `hsl(${hue} 60% 70% / 0.18)`; ctx.lineWidth = 1; ctx.stroke()
+      ctx.strokeStyle = '#33333f'; ctx.lineWidth = 1.5; ctx.stroke()
+
       if (st.breathOn && !st.ended) { // progress arc around one full breath cycle
         const a0p = -Math.PI / 2, a1p = a0p + prog * Math.PI * 2, rp = R * 1.14
         st.flash = Math.max(0, st.flash - dt * 1.6)
-        ctx.beginPath(); ctx.arc(cx, cy, rp, 0, Math.PI * 2) // faint track: the whole cycle
-        ctx.strokeStyle = `hsl(${hue} 60% 75% / 0.12)`; ctx.lineWidth = 1.5; ctx.stroke()
-        if (st.flash > 0) { // soft flash when the circle closes
-          ctx.beginPath(); ctx.arc(cx, cy, rp, 0, Math.PI * 2)
-          ctx.strokeStyle = `hsl(${hue} 90% 82% / ${st.flash * 0.7})`; ctx.lineWidth = 2.5; ctx.stroke()
-        }
+        ctx.beginPath(); ctx.arc(cx, cy, rp, 0, Math.PI * 2) // quiet track: the whole cycle
+        ctx.strokeStyle = '#25252e'; ctx.lineWidth = 3; ctx.stroke()
         ctx.beginPath(); ctx.arc(cx, cy, rp, a0p, a1p)
-        ctx.strokeStyle = `hsl(${hue} 85% 78% / 0.55)`; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.stroke()
-        ctx.beginPath(); ctx.arc(cx + Math.cos(a1p) * rp, cy + Math.sin(a1p) * rp, 3.5, 0, Math.PI * 2)
-        ctx.fillStyle = `hsl(${hue} 90% 85%)`; ctx.fill()
+        ctx.strokeStyle = accent; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.stroke()
+        if (st.flash > 0) { // the closed circle thickens for a moment
+          ctx.beginPath(); ctx.arc(cx, cy, rp, 0, Math.PI * 2)
+          ctx.strokeStyle = accent; ctx.lineWidth = 3 + st.flash * 5; ctx.globalAlpha = st.flash; ctx.stroke(); ctx.globalAlpha = 1
+        }
+        ctx.beginPath(); ctx.arc(cx + Math.cos(a1p) * rp, cy + Math.sin(a1p) * rp, 5, 0, Math.PI * 2)
+        ctx.fillStyle = INK; ctx.fill()
       }
 
-      st.drones = st.drones.filter((d) => {
+      st.drones = st.drones.filter((d) => { // tones: solid discs that swell in and shrink away
         const age = Math.max(0, (now - d.t0) / 1000)
         let env = age < d.at ? age / d.at : Math.max(0, 1 - (age - d.at) / (d.life - d.at))
         if (d.kill) env *= Math.max(0, 1 - (now - d.kill) / 1000)
         if ((age > d.at || d.kill) && env <= 0.001) { d.gain?.disconnect(); return false }
-        const r = (16 + 14 * env + 3 * Math.sin(time * 1.3 + d.x)) * d.size
-        const og = ctx.createRadialGradient(d.x, d.y, 0, d.x, d.y, r * 2.2)
-        og.addColorStop(0, `hsl(${d.hue} 85% 70% / ${0.35 * env})`); og.addColorStop(1, 'transparent')
-        ctx.fillStyle = og; ctx.beginPath(); ctx.arc(d.x, d.y, r * 2.2, 0, Math.PI * 2); ctx.fill()
+        const r = (8 + 20 * env + 2 * Math.sin(time * 1.3 + d.x)) * d.size
         ctx.beginPath(); ctx.arc(d.x, d.y, r, 0, Math.PI * 2)
-        ctx.strokeStyle = `hsl(${d.hue} 85% 75% / ${0.55 * env})`; ctx.lineWidth = 1.2; ctx.stroke()
+        ctx.fillStyle = d.color; ctx.globalAlpha = 0.9 * Math.min(1, env * 3); ctx.fill(); ctx.globalAlpha = 1
         return true
       })
 
+      const dirw = st.w >= 0 ? 1 : -1, streak = Math.min(Math.abs(st.w) * 0.045, 0.75)
       for (let i = 0; i < N; i++) {
-        const ang = st.rot + i * STEP, p = st.pulse[i]
+        const ang = st.rot + i * STEP, p = st.pulse[i], r = 6 + p * 4
+        if (streak > 0.05) { // speed shows as a flat, translucent streak along the ring
+          const tail = ang - dirw * streak
+          ctx.beginPath(); ctx.arc(cx, cy, R, Math.min(ang, tail), Math.max(ang, tail))
+          ctx.strokeStyle = accent; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.globalAlpha = 0.45; ctx.stroke(); ctx.globalAlpha = 1
+        }
         const x = cx + Math.cos(ang) * R, y = cy + Math.sin(ang) * R
-        ctx.beginPath(); ctx.arc(x, y, 6 + p * 7, 0, Math.PI * 2)
-        ctx.fillStyle = `hsl(${hue + i * 3} 85% ${68 + p * 22}%)`
-        ctx.shadowColor = `hsl(${hue + i * 3} 90% 65%)`; ctx.shadowBlur = 14 + p * 34
-        ctx.fill(); ctx.shadowBlur = 0
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = accent; ctx.fill()
+        if (p > 0.02) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = INK; ctx.globalAlpha = p; ctx.fill(); ctx.globalAlpha = 1 }
       }
       ctx.beginPath(); ctx.arc(cx, cy, 2.5, 0, Math.PI * 2)
-      ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.fill()
+      ctx.fillStyle = '#5a5a69'; ctx.fill()
 
       raf = requestAnimationFrame(frame)
     }
@@ -471,7 +472,7 @@ export default function Spin() {
     st.dragging = false
     const now = performance.now()
     if (!st.down.moved && now - st.down.t < 500 && !st.ended) {
-      addDrone(st.down.x, st.down.y, st.hue) // a tap adds a sustained tone
+      addDrone(st.down.x, st.down.y) // a tap adds a sustained tone
       return
     }
     if (now - st.lastT > 90) st.w *= 0.3 // held still before release: no flick
@@ -496,7 +497,7 @@ export default function Spin() {
     if (e.key === 'ArrowRight') { st.w = Math.min(26, st.w + 3); setTouched(true); e.preventDefault() }
     else if (e.key === 'ArrowLeft') { st.w = Math.max(-26, st.w - 3); setTouched(true); e.preventDefault() }
     else if (e.key === ' ' || e.key === 'Enter') {
-      setTouched(true); addDrone(st.W * (0.2 + Math.random() * 0.6), st.H * (0.12 + Math.random() * 0.2), st.hue); e.preventDefault()
+      setTouched(true); addDrone(st.W * (0.2 + Math.random() * 0.6), st.H * (0.12 + Math.random() * 0.2)); e.preventDefault()
     }
   }
 
@@ -504,27 +505,27 @@ export default function Spin() {
     <div ref={wrap} className="sp-root" tabIndex={0} role="application"
       aria-label="Spinner. Arrow keys spin it. Space adds a tone."
       onKeyDown={onKey} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
-      style={{ position: 'fixed', inset: 0, background: '#07070b', overflow: 'hidden', touchAction: 'none', userSelect: 'none',
+      style={{ position: 'fixed', inset: 0, background: BG, overflow: 'hidden', touchAction: 'none', userSelect: 'none',
         fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif' }}>
       <style>{CSS}</style>
       <canvas ref={cvs} aria-hidden="true" style={{ width: '100%', height: '100%', display: 'block' }} />
 
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: `calc(var(--safe-bottom) + ${hintBottom}px)`, textAlign: 'center',
-        color: '#fff', pointerEvents: 'none', opacity: touched ? 0 : 1, transition: 'opacity 1.2s ease-out, bottom .5s' }}>
+        color: INK, pointerEvents: 'none', opacity: touched ? 0 : 1, transition: 'opacity 1.2s ease-out, bottom .5s' }}>
         <div style={{ fontSize: 22, fontWeight: 200, letterSpacing: 1 }}>Flick to spin</div>
         <div style={{ fontSize: 13, opacity: 0.5, marginTop: 6 }}>Tap anywhere to add a tone</div>
       </div>
       <div role="status" aria-live="polite" style={{ position: 'absolute', left: 0, right: 0, bottom: `calc(var(--safe-bottom) + ${hintBottom}px)`,
-        textAlign: 'center', color: '#fff', fontSize: 22, fontWeight: 200, letterSpacing: 1, pointerEvents: 'none',
+        textAlign: 'center', color: INK, fontSize: 22, fontWeight: 200, letterSpacing: 1, pointerEvents: 'none',
         opacity: breathOn && !ended ? 0.85 : 0, transition: 'opacity 0.8s ease-out, bottom .5s' }}>
         {breathOn && !ended ? `Breathe ${phase}` : ''}
       </div>
       <div aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, top: 'calc(var(--safe-top) + 22px)', textAlign: 'center',
-        color: '#fff', fontSize: 12, letterSpacing: 2.5, textTransform: 'uppercase', pointerEvents: 'none',
+        color: INK, fontSize: 12, letterSpacing: 2.5, textTransform: 'uppercase', pointerEvents: 'none',
         opacity: breathOn && !ended ? 0.55 : 0, transition: 'opacity .8s ease-out' }}>{cycles} {cycles === 1 ? 'breath' : 'breaths'}</div>
-      <div aria-hidden={!ended} style={{ position: 'absolute', inset: 0, background: '#07070b', pointerEvents: 'none',
+      <div aria-hidden={!ended} style={{ position: 'absolute', inset: 0, background: BG, pointerEvents: 'none',
         opacity: ended ? 0.94 : 0, transition: `opacity ${FADE_S}s ease-in-out`, display: 'grid', placeItems: 'center' }}>
-        <div style={{ color: '#fff', fontSize: 22, fontWeight: 200, letterSpacing: 1, opacity: ended ? 0.7 : 0,
+        <div style={{ color: INK, fontSize: 22, fontWeight: 200, letterSpacing: 1, opacity: ended ? 0.7 : 0,
           transition: `opacity ${FADE_S}s ease-in-out`, textAlign: 'center' }}>
           Rest<div style={{ fontSize: 13, opacity: 0.55, marginTop: 8, fontWeight: 400 }}>Tap to continue</div>
         </div>
@@ -547,8 +548,8 @@ export default function Spin() {
       <div role="group" aria-label="Sound" onPointerDown={stop}
         onPointerMove={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()} onPointerCancel={(e) => e.stopPropagation()}
         style={{ position: 'absolute', left: 8, right: 8, bottom: 'calc(var(--safe-bottom) + 16px)', maxWidth: 420, margin: '0 auto',
-          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, color: '#fff',
-          opacity: chrome ? 1 : 0.5, transition: 'opacity .6s ease-out' }}>
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, color: INK,
+          opacity: chrome ? 1 : 0.5, transition: 'opacity .6s ease-out', ['--accent' as string]: ACCENTS[voice] } as React.CSSProperties}>
         {/* choose one: radio pills */}
         <fieldset className="sp-fs">
           <legend className="sp-vh">Instrument</legend>
