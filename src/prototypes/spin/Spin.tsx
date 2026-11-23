@@ -61,6 +61,7 @@ const VOICE_ICONS: Record<Voice, React.ReactElement> = {
   drops: <svg {...vIcon}><path d={SPIRAL_ICON} /></svg>,
   ripple: <svg {...vIcon}><path d="M3 12c1.8-4 3.6-4 5.4 0s3.6 4 5.4 0 3.6-4 5.4 0" /><path d="M3 17c1.8-3 3.6-3 5.4 0s3.6 3 5.4 0 3.6-3 5.4 0" opacity=".5" /><path d="M3 7c1.8-3 3.6-3 5.4 0s3.6 3 5.4 0 3.6-3 5.4 0" opacity=".5" /></svg>,
 }
+const PanelIcon = () => <svg {...iconProps}><rect x="3.5" y="4.5" width="17" height="15" rx="3" /><path d="M3.5 13.5h17" /><path d="M8 16.5h8" opacity=".6" /></svg>
 const LookIcon = () => <svg {...iconProps}><path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.4 0 2-1 1.6-2.1-.4-1.2.3-2.4 1.6-2.4H17a3.5 3.5 0 0 0 3.5-3.6C20.5 7.2 16.8 3.5 12 3.5z" /><circle cx="7.8" cy="11.2" r=".9" fill="currentColor" stroke="none" /><circle cx="10.4" cy="7.4" r=".9" fill="currentColor" stroke="none" /><circle cx="14.8" cy="7.6" r=".9" fill="currentColor" stroke="none" /></svg>
 const iconBtn = (on: boolean): React.CSSProperties => ({
   width: 44, height: 44, display: 'grid', placeItems: 'center', border: 0, borderRadius: 22, color: 'var(--ink)',
@@ -134,6 +135,7 @@ export default function Spin() {
   const [pokeTick, setPokeTick] = useState(0)
   const [themeId, setThemeId] = useState<ThemeId>(readLook) // restored from the last visit
   const [lookOpen, setLookOpen] = useState(false)
+  const [dockOpen, setDockOpen] = useState(true) // show or hide the instrument, layer and look controls
   const theme: Theme = THEMES[themeId]
   const reduceRef = useRef(false) // prefers-reduced-motion
   const padRef = useRef<{ gain: GainNode; oscs: OscillatorNode[]; lfo: OscillatorNode } | null>(null)
@@ -620,6 +622,10 @@ export default function Spin() {
   }
 
   const poke = () => setPokeTick((n) => n + 1)
+  // the controls slide up and fade in (250ms, ease-out) and leave a little faster (180ms): they've served their purpose
+  const dockMotion = (dim: number): React.CSSProperties => dockOpen
+    ? { opacity: chrome ? 1 : dim, transform: 'none', visibility: 'visible', transition: 'transform .25s cubic-bezier(.32,.72,0,1), opacity .3s ease-out' }
+    : { opacity: 0, transform: 'translateY(24px)', visibility: 'hidden', pointerEvents: 'none', transition: 'transform .18s ease-in, opacity .18s ease-out, visibility 0s linear .18s' }
   const switchTheme = (id: ThemeId) => { // a theme switch shouldn't fire every colour transition on the page
     const el = wrap.current
     if (el) { el.dataset.switching = '1'; requestAnimationFrame(() => requestAnimationFrame(() => { delete el.dataset.switching })) }
@@ -676,8 +682,12 @@ export default function Spin() {
           <BreatheIcon />
         </button>
         <div style={{ display: 'flex' }}>
-          <button type="button" className="sp-btn" aria-label="Look" aria-pressed={lookOpen} aria-controls="spin-look" style={iconBtn(lookOpen)}
-            onClick={() => { poke(); setLookOpen((o) => !o) }}>
+          <button type="button" className="sp-btn" aria-label="Controls" aria-pressed={dockOpen} aria-controls={lookOpen ? 'spin-look' : 'spin-sound'} style={iconBtn(dockOpen)}
+            onClick={() => { poke(); setDockOpen((o) => !o) }}>
+            <PanelIcon />
+          </button>
+          <button type="button" className="sp-btn" aria-label="Look" aria-pressed={lookOpen && dockOpen} aria-controls="spin-look" style={iconBtn(lookOpen && dockOpen)}
+            onClick={() => { poke(); setLookOpen((o) => !o); setDockOpen(true) }}>
             <LookIcon />
           </button>
           <button type="button" className="sp-btn" aria-label="Mute" aria-pressed={muted} style={iconBtn(false)}
@@ -688,11 +698,11 @@ export default function Spin() {
       </div>
 
       {/* sound controls: minimal pills under the spinner, never a modal, so you can change them mid-spin */}
-      {!lookOpen && <div role="group" aria-label="Sound" onPointerDown={stop}
+      {!lookOpen && <div id="spin-sound" role="group" aria-label="Sound" onPointerDown={stop}
         onPointerMove={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()} onPointerCancel={(e) => e.stopPropagation()}
         style={{ position: 'absolute', left: 8, right: 8, bottom: 'calc(var(--safe-bottom) + 16px)', maxWidth: 420, margin: '0 auto',
           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, color: 'var(--ink)',
-          opacity: chrome ? 1 : 0.5, transition: 'opacity .6s ease-out' }}>
+          ...dockMotion(0.5) }}>
         {/* choose one: radio pills */}
         <fieldset className="sp-fs">
           <legend className="sp-vh">Instrument</legend>
@@ -723,7 +733,7 @@ export default function Spin() {
       {lookOpen && <div id="spin-look" role="group" aria-label="Look" onPointerDown={stop}
         onPointerMove={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()} onPointerCancel={(e) => e.stopPropagation()}
         style={{ position: 'absolute', left: 8, right: 8, bottom: 'calc(var(--safe-bottom) + 16px)', maxWidth: 420, margin: '0 auto',
-          display: 'flex', flexDirection: 'column', gap: 10, color: 'var(--ink)', opacity: chrome ? 1 : 0.6, transition: 'opacity .6s ease-out' }}>
+          display: 'flex', flexDirection: 'column', gap: 10, color: 'var(--ink)', ...dockMotion(0.6) }}>
         <fieldset className="sp-fs"><legend className="sp-vh">Palette</legend>
           <div className="sp-row"><span className="sp-rowl" aria-hidden="true">Palette</span>
             <div className="sp-pills">
