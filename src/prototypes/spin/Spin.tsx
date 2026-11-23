@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 
 const DOTS = 24 // shapes on the ring (and detents per turn)
+const SPIRAL_TURNS = 1.6 // Drops lays its dots on a spiral instead of a circle
+const spiralTaper = (u: number) => Math.pow(Math.sin(Math.PI * u), 0.5) // dots shrink and fade at both ends of the spiral
 const SCALE = [0, 2, 4, 7, 9] // major pentatonic: every combination sounds consonant
 const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
 
@@ -340,7 +342,20 @@ export default function Spin() {
         }
       }
       ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2)
-      ctx.strokeStyle = th.ring; ctx.lineWidth = 1.5; ctx.stroke()
+      ctx.strokeStyle = th.ring; ctx.lineWidth = 1.5
+      const spiral = st.voice === 'drops'
+      if (!spiral) ctx.stroke()
+      else { // the base shape is a spiral: it winds out from the middle and fades at both ends
+        ctx.beginPath(); ctx.lineCap = 'round'
+        for (let i = 1; i <= 90; i++) {
+          const u0 = (i - 1) / 90, u1 = i / 90
+          const t0 = -Math.PI / 2 + u0 * SPIRAL_TURNS * Math.PI * 2, t1 = -Math.PI / 2 + u1 * SPIRAL_TURNS * Math.PI * 2
+          const r0s = R * (0.42 + 0.78 * u0), r1s = R * (0.42 + 0.78 * u1)
+          ctx.beginPath(); ctx.moveTo(cx + Math.cos(t0) * r0s, cy + Math.sin(t0) * r0s); ctx.lineTo(cx + Math.cos(t1) * r1s, cy + Math.sin(t1) * r1s)
+          ctx.globalAlpha = 0.2 + 0.8 * spiralTaper(u1); ctx.stroke()
+        }
+        ctx.globalAlpha = 1
+      }
 
       const dirw = st.w >= 0 ? 1 : -1, streak = Math.min(Math.abs(st.w) * 0.045, 0.75), r0 = dotSize(N)
       // one dot in the chosen shape, centred at (x, y) and pointing outward along `ang`
@@ -372,7 +387,16 @@ export default function Spin() {
         ctx.globalAlpha = 1
       }
       for (let i = 0; i < N; i++) {
-        const ang = st.rot + i * st.step, p = st.pulse[i], r = r0 * (1 + p * 0.65)
+        const p = st.pulse[i]
+        if (spiral) { // dots travel along the spiral: spin one way and they wind outward, spin the other and they wind in
+          const u = ((i / N + st.rot / (Math.PI * 2)) % 1 + 1) % 1, tp = spiralTaper(u)
+          const th2 = -Math.PI / 2 + u * SPIRAL_TURNS * Math.PI * 2, rr = R * (0.42 + 0.78 * u)
+          const x = cx + Math.cos(th2) * rr, y = cy + Math.sin(th2) * rr, r = r0 * (1 + p * 0.65) * (0.3 + 0.7 * tp)
+          drawDot(x, y, th2, r, accent, tp, i * 0.9)
+          if (p > 0.02) drawDot(x, y, th2, r, th.ink, p * tp, i * 0.9)
+          continue
+        }
+        const ang = st.rot + i * st.step, r = r0 * (1 + p * 0.65)
         if (streak > 0.05) { // speed shows as a flat, translucent streak along the ring
           const tail = ang - dirw * streak
           ctx.beginPath(); ctx.arc(cx, cy, R, Math.min(ang, tail), Math.max(ang, tail))
