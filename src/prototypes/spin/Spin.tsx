@@ -7,9 +7,9 @@ const SCALE = [0, 2, 4, 7, 9] // major pentatonic: every combination sounds cons
 const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
 
 type AudioBits = { ctx: AudioContext; master: GainNode }
-type Voice = 'bowl' | 'kalimba' | 'marimba' | 'drops' | 'musicbox'
-const VOICES: Voice[] = ['bowl', 'kalimba', 'marimba', 'drops', 'musicbox']
-const VOICE_LABELS: Record<Voice, string> = { bowl: 'Bowl', kalimba: 'Kalimba', marimba: 'Marimba', drops: 'Drops', musicbox: 'Music box' }
+type Voice = 'bowl' | 'kalimba' | 'marimba' | 'drops' | 'ripple'
+const VOICES: Voice[] = ['bowl', 'kalimba', 'marimba', 'drops', 'ripple']
+const VOICE_LABELS: Record<Voice, string> = { bowl: 'Bowl', kalimba: 'Kalimba', marimba: 'Marimba', drops: 'Drops', ripple: 'Ripple' }
 // ---- looks you can try: palette, dot count, dot shape, font
 type Theme = {
   name: string; bg: string; ink: string; ring: string; dust: [string, string, string]; hub: string
@@ -18,13 +18,13 @@ type Theme = {
 const THEMES = {
   mono: { name: 'Mono', bg: '#0d0d0d', ink: '#f4f4f4', ring: '#333333', dust: ['#3a3a3a', '#2c2c2c', '#222222'], hub: '#666666',
     pill: '#171717', pillBorder: '#2a2a2a', pillText: '#9a9a9a', pressed: '#222222', onAccent: '#0d0d0d',
-    accents: { bowl: '#f4f4f4', kalimba: '#f4f4f4', marimba: '#f4f4f4', drops: '#f4f4f4', musicbox: '#f4f4f4' } },
+    accents: { bowl: '#f4f4f4', kalimba: '#f4f4f4', marimba: '#f4f4f4', drops: '#f4f4f4', ripple: '#f4f4f4' } },
   chalk: { name: 'Chalk', bg: '#f4f4f2', ink: '#141414', ring: '#cfcfcb', dust: ['#c4c4c0', '#d2d2ce', '#dcdcd8'], hub: '#9a9a96',
     pill: '#eaeae6', pillBorder: '#d6d6d1', pillText: '#6a6a66', pressed: '#e2e2de', onAccent: '#f4f4f2',
-    accents: { bowl: '#141414', kalimba: '#141414', marimba: '#141414', drops: '#141414', musicbox: '#141414' } },
+    accents: { bowl: '#141414', kalimba: '#141414', marimba: '#141414', drops: '#141414', ripple: '#141414' } },
   blush: { name: 'Blush', bg: '#f7efec', ink: '#3a2630', ring: '#e6cfd0', dust: ['#e0c7c9', '#e9d6d6', '#f0e2e1'], hub: '#c9a3a8',
     pill: '#f0dede', pillBorder: '#e6cccd', pillText: '#8a6670', pressed: '#ead6d6', onAccent: '#fff6f4',
-    accents: { bowl: '#cf4d78', kalimba: '#d85a82', marimba: '#c0406d', drops: '#d9628d', musicbox: '#b8456f' } },
+    accents: { bowl: '#cf4d78', kalimba: '#d85a82', marimba: '#c0406d', drops: '#d9628d', ripple: '#b8456f' } },
 } satisfies Record<string, Theme>
 type ThemeId = keyof typeof THEMES
 const THEME_IDS = Object.keys(THEMES) as ThemeId[]
@@ -59,7 +59,7 @@ const VOICE_ICONS: Record<Voice, React.ReactElement> = {
   kalimba: <svg {...vIcon}><rect x="5" y="3.5" width="14" height="17" rx="3.5" /><path d="M9 8v8M12 8v10M15 8v7" /></svg>,
   marimba: <svg {...vIcon} strokeWidth="2.4"><path d="M4 7h16M6 12h12M8 17h8" /></svg>,
   drops: <svg {...vIcon}><path d={SPIRAL_ICON} /></svg>,
-  musicbox: <svg {...vIcon}><rect x="4" y="10" width="16" height="9.5" rx="2" /><path d="M7.5 10V6.8h9V10" /><circle cx="12" cy="14.8" r="1.2" /></svg>,
+  ripple: <svg {...vIcon}><path d="M3 12c1.8-4 3.6-4 5.4 0s3.6 4 5.4 0 3.6-4 5.4 0" /><path d="M3 17c1.8-3 3.6-3 5.4 0s3.6 3 5.4 0 3.6-3 5.4 0" opacity=".5" /><path d="M3 7c1.8-3 3.6-3 5.4 0s3.6 3 5.4 0 3.6-3 5.4 0" opacity=".5" /></svg>,
 }
 const LookIcon = () => <svg {...iconProps}><path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.4 0 2-1 1.6-2.1-.4-1.2.3-2.4 1.6-2.4H17a3.5 3.5 0 0 0 3.5-3.6C20.5 7.2 16.8 3.5 12 3.5z" /><circle cx="7.8" cy="11.2" r=".9" fill="currentColor" stroke="none" /><circle cx="10.4" cy="7.4" r=".9" fill="currentColor" stroke="none" /><circle cx="14.8" cy="7.6" r=".9" fill="currentColor" stroke="none" /></svg>
 const iconBtn = (on: boolean): React.CSSProperties => ({
@@ -177,14 +177,14 @@ export default function Spin() {
     const d = ((tick % 15) + 15) % 15
     const f = 196 * 2 ** ((SCALE[d % 5] + 12 * Math.floor(d / 5)) / 12)
     // one partial: oscillator through an attack/decay envelope into the master bus
-    const mk = (type: OscillatorType, freq: number, peak: number, attack: number, decay: number, glideTo?: number) => {
-      const o = a.ctx.createOscillator(), g = a.ctx.createGain()
-      o.type = type; o.frequency.setValueAtTime(freq, t)
-      if (glideTo) o.frequency.exponentialRampToValueAtTime(glideTo, t + 0.09)
-      g.gain.setValueAtTime(0, t)
-      g.gain.linearRampToValueAtTime(peak, t + attack)
-      g.gain.exponentialRampToValueAtTime(0.0001, t + attack + decay)
-      o.connect(g); g.connect(a.master); o.start(t); o.stop(t + attack + decay + 0.05)
+    const mk = (type: OscillatorType, freq: number, peak: number, attack: number, decay: number, glideTo?: number, at = 0, dest: AudioNode = a.master) => {
+      const o = a.ctx.createOscillator(), g = a.ctx.createGain(), t0 = t + at
+      o.type = type; o.frequency.setValueAtTime(freq, t0)
+      if (glideTo) o.frequency.exponentialRampToValueAtTime(glideTo, t0 + 0.09)
+      g.gain.setValueAtTime(0, t0)
+      g.gain.linearRampToValueAtTime(peak, t0 + attack)
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + attack + decay)
+      o.connect(g); g.connect(dest); o.start(t0); o.stop(t0 + attack + decay + 0.05)
     }
     switch (s.current.voice) {
       case 'bowl': // inharmonic partials that decay at different rates = a shimmering, beating tail
@@ -197,9 +197,16 @@ export default function Spin() {
       case 'marimba': // rounded wooden knock with a quick decay
         mk('sine', f, 0.2, 0.004, 0.55); mk('sine', f * 4, 0.05, 0.002, 0.07)
         break
-      case 'musicbox': // tiny, bright and tinkling: a comb tine and its quick, metallic overtone
-        mk('sine', f * 2, 0.11, 0.002, 1.1); mk('sine', f * 2 * 6.27, 0.04, 0.002, 0.16); mk('sine', f * 2 * 17.5, 0.012, 0.001, 0.06)
+      case 'ripple': { // a soft, round pluck followed by three fading echoes, each later and a little lower, like rings spreading across water
+        const tg = a.ctx.createGain(); tg.gain.value = 0.82 // a slow shimmer on the whole tail, matching the wobble of the ring
+        const lfo = a.ctx.createOscillator(); lfo.frequency.value = 6
+        const lg = a.ctx.createGain(); lg.gain.value = 0.18
+        lfo.connect(lg); lg.connect(tg.gain); tg.connect(a.master); lfo.start(t); lfo.stop(t + 2.6)
+        mk('sine', f, 0.17, 0.006, 1.0, undefined, 0, tg); mk('sine', f * 2, 0.045, 0.004, 0.35, undefined, 0, tg)
+        for (const [delay, level, drift] of [[0.17, 0.55, 0.996], [0.4, 0.32, 0.99], [0.74, 0.17, 0.984]])
+          mk('sine', f * drift, 0.17 * level, 0.03, 0.75, undefined, delay, tg)
         break
+      }
       case 'drops': // pitch glides upward like a water drop
         mk('sine', f * 1.5, 0.2, 0.004, 0.4, f * 2.4)
         break
@@ -461,7 +468,7 @@ export default function Spin() {
       // the spiral: five rounds from near the middle out to the edges of the screen, scaled with the breath
       const sMax = (W / 2 - 4) * (R / base), sMin = W * 0.05
       const spiralR = (u: number) => sMin + (sMax - sMin) * u
-      const ripple = st.voice === 'musicbox'
+      const ripple = st.voice === 'ripple'
       if (!spiral) { if (!ripple) ctx.stroke() }
       else { // a flat line that fades in at the middle and out at the outer end
         const SEG = 220
