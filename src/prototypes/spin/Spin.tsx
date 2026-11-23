@@ -683,11 +683,11 @@ export default function Spin() {
         </button>
         <div style={{ display: 'flex' }}>
           <button type="button" className="sp-btn" aria-label="Controls" aria-pressed={dockOpen} aria-controls={lookOpen ? 'spin-look' : 'spin-sound'} style={iconBtn(dockOpen)}
-            onClick={() => { poke(); setDockOpen((o) => !o) }}>
+            onClick={() => { poke(); if (dockOpen) setLookOpen(false); setDockOpen(!dockOpen) }}> {/* hiding also closes the swatches, so the controls always come back as the instruments and layers */}
             <PanelIcon />
           </button>
           <button type="button" className="sp-btn" aria-label="Look" aria-pressed={lookOpen && dockOpen} aria-controls="spin-look" style={iconBtn(lookOpen && dockOpen)}
-            onClick={() => { poke(); setLookOpen((o) => !o); setDockOpen(true) }}>
+            onClick={() => { poke(); setLookOpen(dockOpen ? !lookOpen : true); setDockOpen(true) }}>
             <LookIcon />
           </button>
           <button type="button" className="sp-btn" aria-label="Mute" aria-pressed={muted} style={iconBtn(false)}
