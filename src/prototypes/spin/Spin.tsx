@@ -30,6 +30,13 @@ const SoundIcon = ({ off }: { off: boolean }) => (
     {off ? <path d="M16 9.5l5 5M21 9.5l-5 5" /> : <><path d="M15.5 9a4 4 0 010 6" /><path d="M18 6.5a8 8 0 010 11" opacity=".6" /></>}
   </svg>
 )
+const vIcon = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true } as const
+const VOICE_ICONS: Record<Voice, React.ReactElement> = {
+  bowl: <svg {...vIcon}><path d="M3.5 11h17c0 4.4-3.8 7.5-8.5 7.5S3.5 15.4 3.5 11z" /><path d="M9 21h6" /><path d="M8.5 6.8q3.5-3 7 0" opacity=".6" /></svg>,
+  kalimba: <svg {...vIcon}><rect x="5" y="3.5" width="14" height="17" rx="3.5" /><path d="M9 8v8M12 8v10M15 8v7" /></svg>,
+  marimba: <svg {...vIcon} strokeWidth="2.4"><path d="M4 7h16M6 12h12M8 17h8" /></svg>,
+  drops: <svg {...vIcon}><path d="M12 3.5c3.6 4.4 6 7.2 6 10a6 6 0 0 1-12 0c0-2.8 2.4-5.6 6-10z" /></svg>,
+}
 const iconBtn = (on: boolean): React.CSSProperties => ({
   width: 44, height: 44, display: 'grid', placeItems: 'center', border: 0, borderRadius: 22, color: '#fff',
   background: on ? 'rgba(255,255,255,0.14)' : 'transparent', transition: 'background .3s, opacity .5s',
@@ -40,12 +47,14 @@ const CSS = `
 .sp-btn:focus-visible{outline:2px solid #fff;outline-offset:2px}
 fieldset.sp-fs{border:0;margin:0;padding:0;min-width:0}
 .sp-vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;padding:0}
-.sp-pills{display:flex;justify-content:center;gap:8px;flex-wrap:wrap}
+.sp-pills{display:flex;justify-content:center;gap:6px;flex-wrap:wrap}
 .sp-pill{position:relative;display:block;cursor:pointer}
 .sp-pill::after{content:'';position:absolute;inset:-4px} /* 36px pill, 44px touch target */
 .sp-pill input{position:absolute;opacity:0;width:1px;height:1px}
 .sp-pill span{display:flex;align-items:center;gap:7px;height:36px;padding:0 16px;border-radius:999px;font-size:13px;letter-spacing:.3px;text-transform:capitalize;color:rgba(255,255,255,.72);background:rgba(12,12,22,.4);border:1px solid rgba(255,255,255,.16);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);transition:background .25s,color .25s,border-color .25s}
 .sp-pill input:checked + span{background:rgba(255,255,255,.92);color:#0b0b14;border-color:transparent}
+.sp-pill.vo span{padding:0 10px;gap:5px}
+.sp-pill svg{flex:none}
 .sp-pill.tg input:checked + span{background:rgba(169,180,255,.2);color:#fff;border-color:rgba(169,180,255,.7)}
 .sp-pill.tg span::before{content:'';width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.3);transition:background .25s,box-shadow .25s}
 .sp-pill.tg input:checked + span::before{background:#a9b4ff;box-shadow:0 0 8px #a9b4ff}
@@ -507,7 +516,7 @@ export default function Spin() {
       {/* sound controls: minimal pills under the spinner, never a modal, so you can change them mid-spin */}
       <div role="group" aria-label="Sound" onPointerDown={stop}
         onPointerMove={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()} onPointerCancel={(e) => e.stopPropagation()}
-        style={{ position: 'absolute', left: 12, right: 12, bottom: 'calc(var(--safe-bottom) + 100px)', maxWidth: 420, margin: '0 auto',
+        style={{ position: 'absolute', left: 8, right: 8, bottom: 'calc(var(--safe-bottom) + 100px)', maxWidth: 420, margin: '0 auto',
           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, color: '#fff',
           opacity: chrome ? 1 : 0.5, transition: 'opacity .6s ease-out' }}>
         {/* choose one: radio pills */}
@@ -515,10 +524,10 @@ export default function Spin() {
           <legend className="sp-vh">Instrument</legend>
           <div className="sp-pills">
             {VOICES.map((v) => (
-              <label key={v} className="sp-pill">
+              <label key={v} className="sp-pill vo">
                 <input type="radio" name="voice" value={v} checked={voice === v}
                   onChange={() => { ensureAudio(); setTouched(true); s.current.voice = v; setVoiceState(v); note(7) }} />
-                <span>{v}</span>
+                <span>{VOICE_ICONS[v]}{v}</span>
               </label>
             ))}
           </div>
