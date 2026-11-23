@@ -50,7 +50,7 @@ const VOICE_ICONS: Record<Voice, React.ReactElement> = {
   bowl: <svg {...vIcon}><path d="M3.5 11h17c0 4.4-3.8 7.5-8.5 7.5S3.5 15.4 3.5 11z" /><path d="M9 21h6" /><path d="M8.5 6.8q3.5-3 7 0" opacity=".6" /></svg>,
   kalimba: <svg {...vIcon}><rect x="5" y="3.5" width="14" height="17" rx="3.5" /><path d="M9 8v8M12 8v10M15 8v7" /></svg>,
   marimba: <svg {...vIcon} strokeWidth="2.4"><path d="M4 7h16M6 12h12M8 17h8" /></svg>,
-  drops: <svg {...vIcon}><path d="M12 3.5c3.6 4.4 6 7.2 6 10a6 6 0 0 1-12 0c0-2.8 2.4-5.6 6-10z" /></svg>,
+  drops: <svg {...vIcon}><path d="M12 3.5c4.2 0 7 2.6 7 6 0 3.8-3.2 8-7 10.5-3.8-2.5-7-6.7-7-10.5 0-3.4 2.8-6 7-6z" /><path d="M7.6 9.6c1.5 0 2.8.7 3.5 1.9M16.4 9.6c-1.5 0-2.8.7-3.5 1.9" /></svg>,
 }
 const LookIcon = () => <svg {...iconProps}><path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.4 0 2-1 1.6-2.1-.4-1.2.3-2.4 1.6-2.4H17a3.5 3.5 0 0 0 3.5-3.6C20.5 7.2 16.8 3.5 12 3.5z" /><circle cx="7.8" cy="11.2" r=".9" fill="currentColor" stroke="none" /><circle cx="10.4" cy="7.4" r=".9" fill="currentColor" stroke="none" /><circle cx="14.8" cy="7.6" r=".9" fill="currentColor" stroke="none" /></svg>
 const iconBtn = (on: boolean): React.CSSProperties => ({
@@ -350,11 +350,20 @@ export default function Spin() {
           case 'marimba': // thick, shorter bars
             ctx.moveTo(x - ca * r * 1.5, y - sa * r * 1.5); ctx.lineTo(x + ca * r * 1.5, y + sa * r * 1.5)
             ctx.lineWidth = r * 1.4; ctx.lineCap = 'round'; ctx.stroke(); break
-          case 'drops': { // a small teardrop pointing outward
-            const cxd = x - ca * r * 0.3, cyd = y - sa * r * 0.3, rd = r * 0.95
-            ctx.arc(cxd, cyd, rd, 0, Math.PI * 2); ctx.fill()
-            ctx.beginPath(); ctx.moveTo(x + ca * r * 1.95, y + sa * r * 1.95)
-            ctx.lineTo(cxd - sa * rd, cyd + ca * rd); ctx.lineTo(cxd + sa * rd, cyd - ca * rd); ctx.closePath(); ctx.fill(); break
+          case 'drops': { // a little alien: wide head, pointed chin toward the middle, two slanted eyes
+            const tx = -sa, ty = ca // tangent
+            const rh = r * 1.45, hx = x + ca * r * 0.45, hy = y + sa * r * 0.45 // head centre
+            ctx.ellipse(hx, hy, rh * 1.12, rh * 0.95, ang + Math.PI / 2, 0, Math.PI * 2); ctx.fill()
+            ctx.beginPath(); ctx.moveTo(hx + tx * rh * 1.05, hy + ty * rh * 1.05)
+            ctx.lineTo(hx - ca * rh * 2, hy - sa * rh * 2); ctx.lineTo(hx - tx * rh * 1.05, hy - ty * rh * 1.05); ctx.closePath(); ctx.fill()
+            ctx.fillStyle = st.th.bg // eyes are cut out of the head
+            for (const side of [1, -1]) {
+              ctx.beginPath()
+              ctx.ellipse(hx + tx * side * rh * 0.5 - ca * rh * 0.05, hy + ty * side * rh * 0.5 - sa * rh * 0.05, rh * 0.42, rh * 0.17,
+                ang + Math.PI / 2 + side * 0.5, 0, Math.PI * 2)
+              ctx.fill()
+            }
+            break
           }
           default: ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill() // bowl: a filled circle
         }
