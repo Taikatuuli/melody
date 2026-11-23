@@ -8,29 +8,10 @@ const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
 type AudioBits = { ctx: AudioContext; master: GainNode }
 type Voice = 'bowl' | 'kalimba' | 'marimba' | 'drops'
 const VOICES: Voice[] = ['bowl', 'kalimba', 'marimba', 'drops']
-type Drone = { x: number; y: number; t0: number; tb: Timbre; semi: number; color: string; gain: GainNode | null; kill: number; at: number; life: number; size: number }
-// attack ripple per timbre: how many rings, how long each takes to expand (s), how far they travel (px)
-const RIPPLE: Record<Timbre, { rings: number; dur: number; reach: number; gap: number }> = {
-  bell: { rings: 1, dur: 0.9, reach: 64, gap: 0 },
-  warm: { rings: 1, dur: 1.6, reach: 54, gap: 0 },
-  choir: { rings: 3, dur: 2.4, reach: 70, gap: 0.45 },
-  breath: { rings: 2, dur: 2.2, reach: 60, gap: 0.8 },
-  sub: { rings: 1, dur: 3.2, reach: 100, gap: 0 },
-}
 // flat, matte palette: one background, one ink, one muted accent per instrument
 const BG = '#131318'
 const INK = '#ece9f5'
 const ACCENTS: Record<Voice, string> = { bowl: '#a79fe3', kalimba: '#dcbf90', marimba: '#dc9fac', drops: '#8ab2de' }
-type Timbre = 'warm' | 'choir' | 'bell' | 'breath' | 'sub'
-// attack and total life in seconds, envelope peak, orb size and hue shift per timbre
-const TIMBRES: Record<Timbre, { at: number; life: number; peak: number; size: number; color: string }> = {
-  warm: { at: 2, life: 16, peak: 0.075, size: 1, color: '#dcbf90' },
-  choir: { at: 2.5, life: 14, peak: 0.035, size: 1.15, color: '#a79fe3' },
-  bell: { at: 0.02, life: 9, peak: 0.1, size: 0.85, color: '#8ab2de' },
-  breath: { at: 3, life: 12, peak: 0.4, size: 1.05, color: '#92bca9' },
-  sub: { at: 3, life: 15, peak: 0.14, size: 1.35, color: '#dc9fac' },
-}
-
 const IN_S = 4, OUT_S = 6 // breath: 4 in, 6 out
 const SESSION_S = Number(new URLSearchParams(location.search).get('s')) || 180
 const FADE_S = 8
@@ -100,15 +81,13 @@ export default function Spin() {
   const [cycles, setCycles] = useState(0)
   const [chrome, setChrome] = useState(true)
   const [pokeTick, setPokeTick] = useState(0)
-  const noiseBuf = useRef<AudioBuffer | null>(null)
   const padRef = useRef<{ gain: GainNode; oscs: OscillatorNode[]; lfo: OscillatorNode } | null>(null)
   const noiseRef = useRef<{ gain: GainNode; src: AudioBufferSourceNode } | null>(null)
 
   const s = useRef({
     rot: 0, w: 0.15, dragging: false, lastA: 0, lastT: 0,
-    pulse: new Float32Array(N), lastNote: 0, muted: false, voice: 'bowl' as Voice, lastTimbre: '' as Timbre | '', lastSemi: -1, cyFrac: 0.44, pid: -1, cycleIdx: 0, flash: 0, W: 0, H: 0,
-    drones: [] as Drone[], breathOn: false, breathT0: 0, ended: false, phase: 'in' as 'in' | 'out',
-    down: { x: 0, y: 0, t: 0, moved: false },
+    pulse: new Float32Array(N), lastNote: 0, muted: false, voice: 'bowl' as Voice, cyFrac: 0.44, pid: -1, cycleIdx: 0, flash: 0, W: 0, H: 0,
+    breathOn: false, breathT0: 0, ended: false, phase: 'in' as 'in' | 'out',
   })
 
   const ensureAudio = () => {
@@ -206,78 +185,6 @@ export default function Spin() {
       const n = noiseRef.current; noiseRef.current = null
       n.gain.gain.setTargetAtTime(0, t, 0.5)
       setTimeout(() => { n.src.stop(); n.gain.disconnect() }, 2500)
-    }
-  }
-
-  const addDrone = (x: number, y: number) => {
-    const st = s.current, a = audio.current
-    // a different timbre and a different note each tap, never the same twice in a row
-    const pool = (Object.keys(TIMBRES) as Timbre[]).filter((k) => k !== st.lastTimbre)
-    const tb = pool[(Math.random() * pool.length) | 0]; st.lastTimbre = tb
-    const { at, life, peak, size, color } = TIMBRES[tb]
-    let semi: number
-    do { semi = SCALE[(Math.random() * 5) | 0] + 12 * ((Math.random() * 2) | 0) } while (semi === st.lastSemi)
-    st.lastSemi = semi
-
-    let gain: GainNode | null = null
-    if (a && !st.muted) {
-      const t = a.ctx.currentTime, stopAt = t + life + 0.3
-      const base = tb === 'bell' || tb === 'breath' ? 196 : tb === 'sub' ? 65 : 98
-      const f = base * 2 ** (semi / 12)
-      const env = a.ctx.createGain()
-      env.gain.setValueAtTime(0, t)
-      env.gain.linearRampToValueAtTime(peak, t + at)
-      env.gain.exponentialRampToValueAtTime(0.0001, t + life)
-      const osc = (type: OscillatorType, freq: number, dest: AudioNode, detune = 0, level = 1) => {
-        const o = a.ctx.createOscillator(); o.type = type; o.frequency.value = freq; o.detune.value = detune
-        if (level !== 1) { const g = a.ctx.createGain(); g.gain.value = level; o.connect(g); g.connect(dest) } else o.connect(dest)
-        o.start(t); o.stop(stopAt)
-      }
-      switch (tb) {
-        case 'warm': // two slightly detuned sines: a plain, warm hum
-          osc('sine', f, env, -3); osc('sine', f, env, 3)
-          break
-        case 'choir': { // detuned saws through a low filter: a soft, vowel-like pad
-          const lp = a.ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 520; lp.Q.value = 0.7
-          lp.connect(env)
-          osc('sawtooth', f, lp, -8); osc('sawtooth', f, lp, 0); osc('sawtooth', f, lp, 8)
-          break
-        }
-        case 'bell': // struck bell: inharmonic partials, long ring
-          osc('sine', f, env); osc('sine', f * 2.76, env, 0, 0.45); osc('sine', f * 5.4, env, 0, 0.2)
-          break
-        case 'breath': { // narrow band of noise around the pitch: airy, flute-like
-          if (!noiseBuf.current) {
-            const buf = a.ctx.createBuffer(1, a.ctx.sampleRate * 2, a.ctx.sampleRate)
-            const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1
-            noiseBuf.current = buf
-          }
-          const src = a.ctx.createBufferSource(); src.buffer = noiseBuf.current; src.loop = true
-          const bp = a.ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f * 2; bp.Q.value = 14
-          const boost = a.ctx.createGain(); boost.gain.value = 8
-          src.connect(bp); bp.connect(boost); boost.connect(env); src.start(t); src.stop(stopAt)
-          osc('sine', f, env, 0, 0.05)
-          break
-        }
-        case 'sub': { // deep, slowly pulsing: a heartbeat under everything
-          const trem = a.ctx.createGain(); trem.gain.value = 0.7; trem.connect(env)
-          const lfo = a.ctx.createOscillator(); lfo.frequency.value = 0.3
-          const lg = a.ctx.createGain(); lg.gain.value = 0.3
-          lfo.connect(lg); lg.connect(trem.gain); lfo.start(t); lfo.stop(stopAt)
-          osc('sine', f, trem); osc('sine', f * 2, trem, 0, 0.35) // the upper partial lets phone speakers carry it
-          break
-        }
-      }
-      const pan = a.ctx.createStereoPanner?.()
-      if (pan) { pan.pan.value = Math.max(-0.8, Math.min(0.8, ((x / (st.W || 1)) * 2 - 1) * 0.8)); env.connect(pan); pan.connect(a.master) }
-      else env.connect(a.master)
-      gain = env
-    }
-    st.drones.push({ x, y, t0: performance.now(), tb, semi, color, gain, kill: 0, at, life, size })
-    if (st.drones.filter((d) => !d.kill).length > 6) {
-      const old = st.drones.find((d) => !d.kill)!
-      old.kill = performance.now()
-      if (old.gain && a) { const t = a.ctx.currentTime; old.gain.gain.cancelScheduledValues(t); old.gain.gain.setTargetAtTime(0, t, 0.25) }
     }
   }
 
@@ -407,35 +314,6 @@ export default function Spin() {
         ctx.fillStyle = INK; ctx.fill()
       }
 
-      st.drones = st.drones.filter((d) => { // tones: a core dot (size = pitch), an attack ripple, and a decay arc (= life left)
-        const age = Math.max(0, (now - d.t0) / 1000)
-        let env = age < d.at ? age / d.at : Math.max(0, 1 - (age - d.at) / (d.life - d.at))
-        if (d.kill) env *= Math.max(0, 1 - (now - d.kill) / 1000)
-        if ((age > d.at || d.kill) && env <= 0.001) { d.gain?.disconnect(); return false }
-        const fade = d.kill ? Math.max(0, 1 - (now - d.kill) / 1000) : 1
-        const core = (11 - d.semi * 0.32) * d.size // low notes are bigger, high notes smaller
-        const rp = RIPPLE[d.tb]
-        ctx.lineCap = 'round'
-        for (let i = 0; i < rp.rings; i++) { // attack: rings expand once and fade
-          const t = (age - i * rp.gap) / rp.dur
-          if (t <= 0 || t >= 1) continue
-          const e = 1 - (1 - t) * (1 - t)
-          ctx.beginPath(); ctx.arc(d.x, d.y, core + e * rp.reach, 0, Math.PI * 2)
-          ctx.strokeStyle = d.color; ctx.lineWidth = 1.5; ctx.globalAlpha = (1 - t) * 0.7 * fade; ctx.stroke()
-        }
-        const ra = core + 9 // life: an arc that empties clockwise as the note fades
-        const left = d.kill ? 0 : Math.max(0, 1 - Math.max(0, age - d.at) / (d.life - d.at))
-        ctx.beginPath(); ctx.arc(d.x, d.y, ra, 0, Math.PI * 2)
-        ctx.strokeStyle = '#2b2b35'; ctx.lineWidth = 2; ctx.globalAlpha = fade; ctx.stroke()
-        if (left > 0.002) {
-          ctx.beginPath(); ctx.arc(d.x, d.y, ra, -Math.PI / 2, -Math.PI / 2 + left * Math.PI * 2)
-          ctx.strokeStyle = d.color; ctx.lineWidth = 2; ctx.globalAlpha = 0.9 * fade; ctx.stroke()
-        }
-        ctx.beginPath(); ctx.arc(d.x, d.y, core * (0.35 + 0.65 * Math.min(1, env * 2.5)), 0, Math.PI * 2) // dot swells in with the attack
-        ctx.fillStyle = d.color; ctx.globalAlpha = fade; ctx.fill(); ctx.globalAlpha = 1
-        return true
-      })
-
       const dirw = st.w >= 0 ? 1 : -1, streak = Math.min(Math.abs(st.w) * 0.045, 0.75)
       for (let i = 0; i < N; i++) {
         const ang = st.rot + i * STEP, p = st.pulse[i], r = 6 + p * 4
@@ -469,16 +347,12 @@ export default function Spin() {
     wrap.current!.setPointerCapture(e.pointerId)
     st.pid = e.pointerId
     st.dragging = true; st.lastA = pointerAngle(e); st.lastT = performance.now()
-    const r = wrap.current!.getBoundingClientRect()
-    st.down = { x: e.clientX - r.left, y: e.clientY - r.top, t: performance.now(), moved: false }
     if (st.ended && performance.now() - st.breathT0 > (SESSION_S + 3) * 1000) setBreath(true) // tap to begin again
   }
   const move = (e: React.PointerEvent) => {
     const st = s.current
     if (!st.dragging || e.pointerId !== st.pid) return
     const a = pointerAngle(e), now = performance.now()
-    const rc = wrap.current!.getBoundingClientRect()
-    if (Math.hypot(e.clientX - rc.left - st.down.x, e.clientY - rc.top - st.down.y) > 12) st.down.moved = true
     const d = wrapAngle(a - st.lastA), dt = Math.max((now - st.lastT) / 1000, 0.001)
     const prev = st.rot
     st.rot += d
@@ -497,10 +371,6 @@ export default function Spin() {
     if (!st.dragging || e.pointerId !== st.pid) return
     st.dragging = false
     const now = performance.now()
-    if (!st.down.moved && now - st.down.t < 500 && !st.ended) {
-      addDrone(st.down.x, st.down.y) // a tap adds a sustained tone
-      return
-    }
     if (now - st.lastT > 90) st.w *= 0.3 // held still before release: no flick
   }
 
@@ -515,21 +385,18 @@ export default function Spin() {
   const stop = (e: React.PointerEvent) => { e.stopPropagation(); poke() }
   const hintBottom = 190
 
-  // keyboard access to the spinner itself: arrows spin it, space adds a tone
+  // keyboard access to the spinner itself: arrows spin it
   const onKey = (e: React.KeyboardEvent) => {
     if (e.target !== e.currentTarget) return
     const st = s.current
     poke(); ensureAudio()
     if (e.key === 'ArrowRight') { st.w = Math.min(26, st.w + 3); setTouched(true); e.preventDefault() }
     else if (e.key === 'ArrowLeft') { st.w = Math.max(-26, st.w - 3); setTouched(true); e.preventDefault() }
-    else if (e.key === ' ' || e.key === 'Enter') {
-      setTouched(true); addDrone(st.W * (0.2 + Math.random() * 0.6), st.H * (0.12 + Math.random() * 0.2)); e.preventDefault()
-    }
   }
 
   return (
     <div ref={wrap} className="sp-root" tabIndex={0} role="application"
-      aria-label="Spinner. Arrow keys spin it. Space adds a tone."
+      aria-label="Spinner. Arrow keys spin it."
       onKeyDown={onKey} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
       style={{ position: 'fixed', inset: 0, background: BG, overflow: 'hidden', touchAction: 'none', userSelect: 'none',
         fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif' }}>
@@ -539,7 +406,6 @@ export default function Spin() {
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: `calc(var(--safe-bottom) + ${hintBottom}px)`, textAlign: 'center',
         color: INK, pointerEvents: 'none', opacity: touched ? 0 : 1, transition: 'opacity 1.2s ease-out, bottom .5s' }}>
         <div style={{ fontSize: 22, fontWeight: 200, letterSpacing: 1 }}>Flick to spin</div>
-        <div style={{ fontSize: 13, opacity: 0.5, marginTop: 6 }}>Tap anywhere to add a tone</div>
       </div>
       <div role="status" aria-live="polite" style={{ position: 'absolute', left: 0, right: 0, bottom: `calc(var(--safe-bottom) + ${hintBottom}px)`,
         textAlign: 'center', color: INK, fontSize: 22, fontWeight: 200, letterSpacing: 1, pointerEvents: 'none',
