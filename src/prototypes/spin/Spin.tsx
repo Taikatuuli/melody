@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
-const MAX_N = 24 // most nodes (and detents) the spinner can have
+const DOTS = 24 // shapes on the ring (and detents per turn)
 const SCALE = [0, 2, 4, 7, 9] // major pentatonic: every combination sounds consonant
 const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
 
@@ -25,16 +25,14 @@ const THEMES = {
 } satisfies Record<string, Theme>
 type ThemeId = keyof typeof THEMES
 const THEME_IDS = Object.keys(THEMES) as ThemeId[]
-const COUNTS = [6, 8, 12, 18, 24]
 const SANS = '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif'
 const dotSize = (n: number) => Math.max(3, Math.min(10, 21 / Math.sqrt(n))) // fewer dots are bigger, more dots smaller
 const LOOK_KEY = 'spin-look'
-const readLook = (): { theme: ThemeId; n: number } => {
-  const d = { theme: 'mono' as ThemeId, n: 12 }
+const readLook = (): ThemeId => {
   try {
     const j = JSON.parse(localStorage.getItem(LOOK_KEY) || '{}')
-    return { theme: j.theme in THEMES ? j.theme : d.theme, n: COUNTS.includes(j.n) ? j.n : d.n }
-  } catch { return d }
+    return j.theme in THEMES ? j.theme : 'mono'
+  } catch { return 'mono' }
 }
 const IN_S = 4, OUT_S = 6 // breath: 4 in, 6 out
 const SESSION_S = Number(new URLSearchParams(location.search).get('s')) || 180
@@ -72,7 +70,6 @@ fieldset.sp-fs{border:0;margin:0;padding:0;min-width:0}
 .sp-pill span{display:flex;align-items:center;gap:7px;height:36px;padding:0 16px;border-radius:999px;font-size:13px;letter-spacing:.3px;text-transform:capitalize;color:var(--pillt);background:var(--pill);border:1px solid var(--pillb);transition:background .25s,color .25s,border-color .25s}
 .sp-pill input:checked + span{background:var(--accent);color:var(--onaccent);border-color:transparent}
 .sp-pill.vo span{padding:0 10px;gap:5px}
-.sp-pill.sq span{padding:0;width:36px;justify-content:center}
 .sp-pill.sw span{padding:0;width:36px;justify-content:center;background:transparent}
 .sp-pill.sw input:checked + span{background:transparent;border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
 .sp-pill svg{flex:none}
@@ -112,9 +109,7 @@ export default function Spin() {
   const [cycles, setCycles] = useState(0)
   const [chrome, setChrome] = useState(true)
   const [pokeTick, setPokeTick] = useState(0)
-  const [look] = useState(readLook) // restored from the last visit
-  const [themeId, setThemeId] = useState<ThemeId>(look.theme)
-  const [n, setN] = useState(look.n)
+  const [themeId, setThemeId] = useState<ThemeId>(readLook) // restored from the last visit
   const [lookOpen, setLookOpen] = useState(false)
   const theme: Theme = THEMES[themeId]
   const padRef = useRef<{ gain: GainNode; oscs: OscillatorNode[]; lfo: OscillatorNode } | null>(null)
@@ -122,14 +117,14 @@ export default function Spin() {
 
   const s = useRef({
     rot: 0, w: 0.15, dragging: false, lastA: 0, lastT: 0,
-    pulse: new Float32Array(MAX_N), th: THEMES.mono as Theme, n: 12, step: (Math.PI * 2) / 12, lastNote: 0, muted: false, voice: 'bowl' as Voice, cyFrac: 0.44, pid: -1, cycleIdx: 0, W: 0, H: 0,
+    pulse: new Float32Array(DOTS), th: THEMES.mono as Theme, n: DOTS, step: (Math.PI * 2) / DOTS, lastNote: 0, muted: false, voice: 'bowl' as Voice, cyFrac: 0.44, pid: -1, cycleIdx: 0, W: 0, H: 0,
     breathOn: false, breathT0: 0, ended: false, phase: 'in' as 'in' | 'out',
   })
 
-  s.current.th = theme; s.current.n = n; s.current.step = (Math.PI * 2) / n // the canvas reads the look from here
+  s.current.th = theme // the canvas reads the look from here
   useEffect(() => {
-    try { localStorage.setItem(LOOK_KEY, JSON.stringify({ theme: themeId, n })) } catch { /* private mode */ }
-  }, [themeId, n])
+    try { localStorage.setItem(LOOK_KEY, JSON.stringify({ theme: themeId })) } catch { /* private mode */ }
+  }, [themeId])
 
   const ensureAudio = () => {
     if (audio.current) {
@@ -433,7 +428,7 @@ export default function Spin() {
 
   const poke = () => setPokeTick((n) => n + 1)
   const stop = (e: React.PointerEvent) => { e.stopPropagation(); poke() }
-  const hintBottom = lookOpen ? 240 : 190
+  const hintBottom = 190
 
   // keyboard access to the spinner itself: arrows spin it
   const onKey = (e: React.KeyboardEvent) => {
@@ -523,7 +518,7 @@ export default function Spin() {
         </fieldset>
       </div>}
 
-      {/* look controls: palette, dot count, dot shape, font. They replace the sound pills while open, so the spinner stays clear */}
+      {/* look controls: the palette. They replace the sound pills while open, so the spinner stays clear */}
       {lookOpen && <div id="spin-look" role="group" aria-label="Look" onPointerDown={stop}
         onPointerMove={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()} onPointerCancel={(e) => e.stopPropagation()}
         style={{ position: 'absolute', left: 8, right: 8, bottom: 'calc(var(--safe-bottom) + 16px)', maxWidth: 420, margin: '0 auto',
@@ -536,17 +531,6 @@ export default function Spin() {
                   <input type="radio" name="theme" value={id} checked={themeId === id} onChange={() => setThemeId(id)} />
                   <span><i className="sp-sw" style={{ background: `linear-gradient(90deg, ${THEMES[id].bg} 50%, ${THEMES[id].accents.bowl} 50%)`,
                     boxShadow: `inset 0 0 0 1px ${THEMES[id].pillBorder}` }} /><b className="sp-vh">{THEMES[id].name}</b></span>
-                </label>
-              ))}
-            </div></div>
-        </fieldset>
-        <fieldset className="sp-fs"><legend className="sp-vh">Dots</legend>
-          <div className="sp-row"><span className="sp-rowl" aria-hidden="true">Dots</span>
-            <div className="sp-pills">
-              {COUNTS.map((c) => (
-                <label key={c} className="sp-pill sq">
-                  <input type="radio" name="count" value={c} checked={n === c} onChange={() => setN(c)} />
-                  <span>{c}</span>
                 </label>
               ))}
             </div></div>
