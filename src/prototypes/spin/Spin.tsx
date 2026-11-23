@@ -304,21 +304,32 @@ export default function Spin() {
         const off = st.breathOn ? 1 : Math.max(0, 1 - (now - st.seedOff) / 600)
         const fade = st.seedFade ? Math.max(0, 1 - (now - st.seedFade) / (SEED_FADE_S * 1000)) : 1
         if (off <= 0 || fade <= 0) st.circles = []
+        const Q = 0.12 // share of each breath spent leaving the middle, and again returning to it
         for (const c of st.circles) {
-          // the breath arc's dot is the pen: while it travels once round the outer ring, this circle is drawn in step with it
+          // the pen starts at the middle, goes out to the circle's top, draws it clockwise, then comes back to the middle
           const p = Math.min(1, (now - c.born) / ((IN_S + OUT_S) * 1000))
           const th = -Math.PI / 2 + (c.k - 1) * (Math.PI / 3)
           const x = c.k === 0 ? cx : cx + Math.cos(th) * r, y = c.k === 0 ? cy : cy + Math.sin(th) * r
-          const a0 = -Math.PI / 2, a1 = a0 + p * Math.PI * 2
-          if (p >= 1) { // finished: the closed circle and a faint flat fill where circles overlap
-            ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2)
-            ctx.fillStyle = accent; ctx.globalAlpha = 0.07 * off * fade; ctx.fill()
-            ctx.strokeStyle = accent; ctx.lineWidth = 1.75; ctx.globalAlpha = 0.9 * off * fade; ctx.stroke()
-          } else {
+          const p2 = Math.max(0, Math.min(1, (p - Q) / (1 - 2 * Q))) // progress of the circle itself
+          const a0 = -Math.PI / 2, a1 = a0 + p2 * Math.PI * 2
+          const sx = x, sy = y - r // where the circle starts
+          let px: number, py: number
+          if (p < Q) { const e = ease(p / Q); px = cx + (sx - cx) * e; py = cy + (sy - cy) * e }
+          else if (p < 1 - Q) { px = x + Math.cos(a1) * r; py = y + Math.sin(a1) * r }
+          else { const e = ease((p - (1 - Q)) / Q); px = sx + (cx - sx) * e; py = sy + (cy - sy) * e }
+          if (p >= 1) { // finished: faint flat fill where circles overlap
+            ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = accent; ctx.globalAlpha = 0.07 * off * fade; ctx.fill()
+          }
+          if (p2 > 0) {
             ctx.beginPath(); ctx.arc(x, y, r, a0, a1)
             ctx.strokeStyle = accent; ctx.lineWidth = 1.75; ctx.lineCap = 'round'; ctx.globalAlpha = 0.9 * off * fade; ctx.stroke()
-            ctx.beginPath(); ctx.arc(x + Math.cos(a1) * r, y + Math.sin(a1) * r, 3.5, 0, Math.PI * 2) // pen tip, at the same clock angle as the ring's dot
-            ctx.fillStyle = INK; ctx.globalAlpha = off * fade; ctx.fill()
+          }
+          if (p < 1) {
+            if (p < Q || p > 1 - Q) { // a thin leader line shows the pen's trip out of, and back to, the middle
+              ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(px, py)
+              ctx.strokeStyle = accent; ctx.lineWidth = 1; ctx.globalAlpha = 0.35 * off * fade; ctx.stroke()
+            }
+            ctx.beginPath(); ctx.arc(px, py, 3.5, 0, Math.PI * 2); ctx.fillStyle = INK; ctx.globalAlpha = off * fade; ctx.fill()
           }
           ctx.globalAlpha = 1
         }
