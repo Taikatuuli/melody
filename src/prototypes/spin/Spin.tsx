@@ -6,8 +6,8 @@ const SCALE = [0, 2, 4, 7, 9] // major pentatonic: every combination sounds cons
 const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
 
 type AudioBits = { ctx: AudioContext; master: GainNode }
-type Voice = 'bowl' | 'kalimba' | 'glass' | 'marimba' | 'drops'
-const VOICES: Voice[] = ['bowl', 'kalimba', 'glass', 'marimba', 'drops']
+type Voice = 'bowl' | 'kalimba' | 'marimba' | 'drops'
+const VOICES: Voice[] = ['bowl', 'kalimba', 'marimba', 'drops']
 type Drone = { x: number; y: number; t0: number; hue: number; gain: GainNode | null; kill: number }
 
 const IN_S = 4, OUT_S = 6 // breath: 4 in, 6 out
@@ -82,9 +82,6 @@ export default function Spin() {
         break
       case 'kalimba': // short plucked attack with a metallic tick on top
         mk('triangle', f * 2, 0.15, 0.003, 0.9); mk('sine', f * 2 * 5.4, 0.03, 0.002, 0.12)
-        break
-      case 'glass': // pure high sines, slow bloom, long tail
-        mk('sine', f * 2, 0.07, 0.09, 2.8); mk('sine', f * 3, 0.025, 0.12, 2.2)
         break
       case 'marimba': // rounded wooden knock with a quick decay
         mk('sine', f, 0.2, 0.004, 0.55); mk('sine', f * 4, 0.05, 0.002, 0.07)
