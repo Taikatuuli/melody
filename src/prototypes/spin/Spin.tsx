@@ -46,11 +46,16 @@ const SoundIcon = ({ off }: { off: boolean }) => (
   </svg>
 )
 const vIcon = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true } as const
+// a small spiral for the Drops icon: a polyline that winds out from the middle
+const SPIRAL_ICON = Array.from({ length: 41 }, (_, i) => {
+  const t = i / 40, th = t * 2.3 * Math.PI * 2 - 0.4, r = 0.8 + 8.4 * t
+  return `${i ? 'L' : 'M'}${(12 + Math.cos(th) * r).toFixed(2)} ${(12 + Math.sin(th) * r).toFixed(2)}`
+}).join('')
 const VOICE_ICONS: Record<Voice, React.ReactElement> = {
   bowl: <svg {...vIcon}><path d="M3.5 11h17c0 4.4-3.8 7.5-8.5 7.5S3.5 15.4 3.5 11z" /><path d="M9 21h6" /><path d="M8.5 6.8q3.5-3 7 0" opacity=".6" /></svg>,
   kalimba: <svg {...vIcon}><rect x="5" y="3.5" width="14" height="17" rx="3.5" /><path d="M9 8v8M12 8v10M15 8v7" /></svg>,
   marimba: <svg {...vIcon} strokeWidth="2.4"><path d="M4 7h16M6 12h12M8 17h8" /></svg>,
-  drops: <svg {...vIcon}><path d="M4.5 18.5c3.2-.3 3.6-3.8 5.6-6 1.4-1.6 3.4-2.2 4-4.4.5-2-1-3.8-3.2-3.4C7.6 5.3 6 9 5.6 12.2c-.3 2.4-.6 4.3-1.1 6.3z" /></svg>,
+  drops: <svg {...vIcon}><path d={SPIRAL_ICON} /></svg>,
 }
 const LookIcon = () => <svg {...iconProps}><path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.4 0 2-1 1.6-2.1-.4-1.2.3-2.4 1.6-2.4H17a3.5 3.5 0 0 0 3.5-3.6C20.5 7.2 16.8 3.5 12 3.5z" /><circle cx="7.8" cy="11.2" r=".9" fill="currentColor" stroke="none" /><circle cx="10.4" cy="7.4" r=".9" fill="currentColor" stroke="none" /><circle cx="14.8" cy="7.6" r=".9" fill="currentColor" stroke="none" /></svg>
 const iconBtn = (on: boolean): React.CSSProperties => ({
@@ -350,22 +355,17 @@ export default function Spin() {
           case 'marimba': // thick, shorter bars
             ctx.moveTo(x - ca * r * 1.5, y - sa * r * 1.5); ctx.lineTo(x + ca * r * 1.5, y + sa * r * 1.5)
             ctx.lineWidth = r * 1.4; ctx.lineCap = 'round'; ctx.stroke(); break
-          case 'drops': { // an organic water form: a lopsided blob with a curling tail toward the middle, slowly wobbling
-            const w1 = 1 + 0.1 * Math.sin(time * 1.3 + ph), w2 = 1 + 0.14 * Math.sin(time * 1.7 + ph * 1.3 + 1)
-            const R = r * 1.15
-            // (u, v): u runs outward along the ring's radius, v across it
-            const P = (u: number, v: number): [number, number] => [x + (ca * u - sa * v) * R, y + (sa * u + ca * v) * R]
-            const T = P(-2.3 * w2, 0.65 * w2) // curling tail tip
-            ctx.moveTo(T[0], T[1])
-            const a1 = P(-1.5, 0.05), a2 = P(-0.9, -1.15 * w1), a3 = P(0.1, -1.2 * w1)
-            ctx.bezierCurveTo(a1[0], a1[1], a2[0], a2[1], a3[0], a3[1])
-            const b1 = P(0.9 * w1, -1.3 * w1), b2 = P(1.75 * w1, -0.7), b3 = P(1.55 * w1, 0.05)
-            ctx.bezierCurveTo(b1[0], b1[1], b2[0], b2[1], b3[0], b3[1])
-            const c1 = P(1.4 * w1, 0.95), c2 = P(0.95, 1.5 * w1), c3 = P(0.1, 1.3 * w1)
-            ctx.bezierCurveTo(c1[0], c1[1], c2[0], c2[1], c3[0], c3[1])
-            const d1 = P(-0.7, 1.1), d2 = P(-1.5, 1.2 * w2), d3 = T
-            ctx.bezierCurveTo(d1[0], d1[1], d2[0], d2[1], d3[0], d3[1])
-            ctx.closePath(); ctx.fill(); break
+          case 'drops': { // a small spiral, thick on the outside and tapering into a tight curl, turning slowly
+            const R = r * 2, turns = 1.55, steps = 26, spin = ang + time * 0.5 + ph
+            ctx.lineCap = 'round'
+            let px = 0, py = 0
+            for (let i = 0; i <= steps; i++) {
+              const t = i / steps, th = spin + (1 - t) * turns * Math.PI * 2, rad = R * (0.08 + 0.92 * t)
+              const sx = x + Math.cos(th) * rad, sy = y + Math.sin(th) * rad
+              if (i > 0) { ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(sx, sy); ctx.lineWidth = Math.max(1.3, r * (0.22 + 0.38 * t)); ctx.stroke() }
+              px = sx; py = sy
+            }
+            break
           }
           default: ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill() // bowl: a filled circle
         }
