@@ -7,9 +7,9 @@ const SCALE = [0, 2, 4, 7, 9] // major pentatonic: every combination sounds cons
 const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
 
 type AudioBits = { ctx: AudioContext; master: GainNode }
-type Voice = 'bowl' | 'kalimba' | 'marimba' | 'drops' | 'handpan' | 'harp' | 'musicbox'
-const VOICES: Voice[] = ['bowl', 'kalimba', 'marimba', 'drops', 'handpan', 'harp', 'musicbox']
-const VOICE_LABELS: Record<Voice, string> = { bowl: 'Bowl', kalimba: 'Kalimba', marimba: 'Marimba', drops: 'Drops', handpan: 'Handpan', harp: 'Harp', musicbox: 'Music box' }
+type Voice = 'bowl' | 'kalimba' | 'marimba' | 'drops' | 'handpan' | 'musicbox'
+const VOICES: Voice[] = ['bowl', 'kalimba', 'marimba', 'drops', 'handpan', 'musicbox']
+const VOICE_LABELS: Record<Voice, string> = { bowl: 'Bowl', kalimba: 'Kalimba', marimba: 'Marimba', drops: 'Drops', handpan: 'Handpan', musicbox: 'Music box' }
 // ---- looks you can try: palette, dot count, dot shape, font
 type Theme = {
   name: string; bg: string; ink: string; ring: string; dust: [string, string, string]; hub: string
@@ -18,13 +18,13 @@ type Theme = {
 const THEMES = {
   mono: { name: 'Mono', bg: '#0d0d0d', ink: '#f4f4f4', ring: '#333333', dust: ['#3a3a3a', '#2c2c2c', '#222222'], hub: '#666666',
     pill: '#171717', pillBorder: '#2a2a2a', pillText: '#9a9a9a', pressed: '#222222', onAccent: '#0d0d0d',
-    accents: { bowl: '#f4f4f4', kalimba: '#f4f4f4', marimba: '#f4f4f4', drops: '#f4f4f4', handpan: '#f4f4f4', harp: '#f4f4f4', musicbox: '#f4f4f4' } },
+    accents: { bowl: '#f4f4f4', kalimba: '#f4f4f4', marimba: '#f4f4f4', drops: '#f4f4f4', handpan: '#f4f4f4', musicbox: '#f4f4f4' } },
   chalk: { name: 'Chalk', bg: '#f4f4f2', ink: '#141414', ring: '#cfcfcb', dust: ['#c4c4c0', '#d2d2ce', '#dcdcd8'], hub: '#9a9a96',
     pill: '#eaeae6', pillBorder: '#d6d6d1', pillText: '#6a6a66', pressed: '#e2e2de', onAccent: '#f4f4f2',
-    accents: { bowl: '#141414', kalimba: '#141414', marimba: '#141414', drops: '#141414', handpan: '#141414', harp: '#141414', musicbox: '#141414' } },
+    accents: { bowl: '#141414', kalimba: '#141414', marimba: '#141414', drops: '#141414', handpan: '#141414', musicbox: '#141414' } },
   blush: { name: 'Blush', bg: '#f7efec', ink: '#3a2630', ring: '#e6cfd0', dust: ['#e0c7c9', '#e9d6d6', '#f0e2e1'], hub: '#c9a3a8',
     pill: '#f0dede', pillBorder: '#e6cccd', pillText: '#8a6670', pressed: '#ead6d6', onAccent: '#fff6f4',
-    accents: { bowl: '#cf4d78', kalimba: '#d85a82', marimba: '#c0406d', drops: '#d9628d', handpan: '#c75a7e', harp: '#d65f88', musicbox: '#b8456f' } },
+    accents: { bowl: '#cf4d78', kalimba: '#d85a82', marimba: '#c0406d', drops: '#d9628d', handpan: '#c75a7e', musicbox: '#b8456f' } },
 } satisfies Record<string, Theme>
 type ThemeId = keyof typeof THEMES
 const THEME_IDS = Object.keys(THEMES) as ThemeId[]
@@ -60,7 +60,6 @@ const VOICE_ICONS: Record<Voice, React.ReactElement> = {
   marimba: <svg {...vIcon} strokeWidth="2.4"><path d="M4 7h16M6 12h12M8 17h8" /></svg>,
   drops: <svg {...vIcon}><path d={SPIRAL_ICON} /></svg>,
   handpan: <svg {...vIcon}><circle cx="12" cy="12" r="8.4" /><circle cx="12" cy="12" r="3.3" /></svg>,
-  harp: <svg {...vIcon}><path d="M6 20V9.5C6 6 8.6 3.8 12.2 3.8c3.2 0 5.3 1.7 5.8 4.2L16 20" /><path d="M9.5 7.6V18M12.7 6.4V18M16 9.6V18" opacity=".7" /></svg>,
   musicbox: <svg {...vIcon}><rect x="4" y="10" width="16" height="9.5" rx="2" /><path d="M7.5 10V6.8h9V10" /><circle cx="12" cy="14.8" r="1.2" /></svg>,
 }
 const LookIcon = () => <svg {...iconProps}><path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.4 0 2-1 1.6-2.1-.4-1.2.3-2.4 1.6-2.4H17a3.5 3.5 0 0 0 3.5-3.6C20.5 7.2 16.8 3.5 12 3.5z" /><circle cx="7.8" cy="11.2" r=".9" fill="currentColor" stroke="none" /><circle cx="10.4" cy="7.4" r=".9" fill="currentColor" stroke="none" /><circle cx="14.8" cy="7.6" r=".9" fill="currentColor" stroke="none" /></svg>
@@ -198,9 +197,6 @@ export default function Spin() {
         break
       case 'handpan': // warm and round: a soft attack that settles, with octave and twelfth overtones
         mk('sine', f * 0.75 * 1.025, 0.17, 0.003, 1.9, f * 0.75); mk('sine', f * 1.5, 0.09, 0.003, 1.3); mk('sine', f * 2.25, 0.035, 0.003, 0.75)
-        break
-      case 'harp': // a plucked string: harmonics that die away faster the higher they are
-        for (let n = 1; n <= 5; n++) mk('sine', f * n, 0.15 / n ** 1.15, 0.002, 2.6 / n ** 0.8)
         break
       case 'musicbox': // tiny, bright and tinkling: a comb tine and its quick, metallic overtone
         mk('sine', f * 2, 0.11, 0.002, 1.1); mk('sine', f * 2 * 6.27, 0.04, 0.002, 0.16); mk('sine', f * 2 * 17.5, 0.012, 0.001, 0.06)
@@ -486,15 +482,10 @@ export default function Spin() {
           case 'handpan': // a hollow ring with a dot in the middle, like a dimple on the drum
             ctx.arc(x, y, r * 1.15, 0, Math.PI * 2); ctx.lineWidth = Math.max(1.5, r * 0.34); ctx.stroke()
             ctx.beginPath(); ctx.arc(x, y, r * 0.38, 0, Math.PI * 2); ctx.fill(); break
-          case 'harp': { // a thin arc bowing outward, like a string seen from above
+          case 'musicbox': { // a thin arc bowing outward, like a comb tine bent over
             const tx = -sa, ty = ca, L = r * 1.5
             ctx.moveTo(x - tx * L, y - ty * L); ctx.quadraticCurveTo(x + ca * r * 1.9, y + sa * r * 1.9, x + tx * L, y + ty * L)
             ctx.lineWidth = Math.max(1.5, r * 0.45); ctx.lineCap = 'round'; ctx.stroke(); break
-          }
-          case 'musicbox': { // a tiny peg: a small head on a short stem pointing outward
-            ctx.moveTo(x - ca * r * 0.4, y - sa * r * 0.4); ctx.lineTo(x + ca * r * 1.5, y + sa * r * 1.5)
-            ctx.lineWidth = Math.max(1.2, r * 0.3); ctx.lineCap = 'round'; ctx.stroke()
-            ctx.beginPath(); ctx.arc(x - ca * r * 0.5, y - sa * r * 0.5, r * 0.62, 0, Math.PI * 2); ctx.fill(); break
           }
           default: ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill() // bowl and drops: plain filled dots
         }
