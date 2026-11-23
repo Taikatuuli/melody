@@ -34,12 +34,41 @@ const iconBtn = (on: boolean): React.CSSProperties => ({
   width: 44, height: 44, display: 'grid', placeItems: 'center', border: 0, borderRadius: 22, color: '#fff',
   background: on ? 'rgba(255,255,255,0.14)' : 'transparent', transition: 'background .3s, opacity .5s',
 })
-const label: React.CSSProperties = { fontSize: 11, letterSpacing: 2, textTransform: 'uppercase', opacity: 0.45, margin: '16px 4px 8px' }
-const seg: React.CSSProperties = { display: 'flex', padding: 3, gap: 2, background: 'rgba(255,255,255,0.06)', borderRadius: 14 }
-const segBtn = (on: boolean): React.CSSProperties => ({
-  flex: 1, height: 38, border: 0, borderRadius: 11, fontSize: 13, letterSpacing: 0.3, color: '#fff',
-  background: on ? 'rgba(255,255,255,0.16)' : 'transparent', opacity: on ? 1 : 0.55, transition: 'background .25s, opacity .25s',
-})
+const legend: React.CSSProperties = { fontSize: 11, letterSpacing: 2, textTransform: 'uppercase', opacity: 0.45, padding: '0 4px', margin: '0 0 8px' }
+const CSS = `
+.sp-root:focus{outline:none}
+.sp-root:focus-visible{outline:2px solid rgba(255,255,255,.5);outline-offset:-4px}
+.sp-btn:focus-visible{outline:2px solid #fff;outline-offset:2px}
+fieldset.sp-fs{border:0;margin:12px 0 0;padding:0;min-width:0}
+.sp-fs legend{float:left;width:100%;padding:0}
+.sp-fs legend + *{clear:both}
+.sp-seg{display:flex;padding:3px;gap:2px;background:rgba(255,255,255,.06);border-radius:14px}
+.sp-seg label{flex:1;position:relative;display:block}
+.sp-radio{position:absolute;opacity:0;width:1px;height:1px}
+.sp-seg span{display:grid;place-items:center;height:38px;border-radius:11px;font-size:13px;letter-spacing:.3px;opacity:.55;text-transform:capitalize;cursor:pointer;transition:background .25s,opacity .25s}
+.sp-radio:checked + span{background:rgba(255,255,255,.16);opacity:1}
+.sp-radio:focus-visible + span{outline:2px solid #fff;outline-offset:1px}
+.sp-row{display:flex;align-items:center;justify-content:space-between;min-height:52px;padding:0 4px;cursor:pointer;font-size:15px}
+.sp-row + .sp-row{border-top:1px solid rgba(255,255,255,.07)}
+.sp-sw-in{position:absolute;opacity:0;width:1px;height:1px}
+.sp-sw{position:relative;flex:none;width:51px;height:31px;border-radius:16px;background:rgba(255,255,255,.16);transition:background .25s}
+.sp-sw::after{content:'';position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.35);transition:transform .25s cubic-bezier(.2,.8,.2,1)}
+.sp-sw-in:checked + .sp-sw{background:#7b86f5}
+.sp-sw-in:checked + .sp-sw::after{transform:translateX(20px)}
+.sp-sw-in:focus-visible + .sp-sw{outline:2px solid #fff;outline-offset:2px}
+@media (prefers-reduced-motion: reduce){.sp-sw,.sp-sw::after,.sp-seg span{transition:none}}
+`
+
+// a switch is the right control for an independent on/off setting
+function SwitchRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="sp-row">
+      <span>{label}</span>
+      <input className="sp-sw-in" type="checkbox" role="switch" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span className="sp-sw" aria-hidden="true" />
+    </label>
+  )
+}
 const ease = (x: number) => 0.5 - 0.5 * Math.cos(Math.PI * x) // smooth 0..1
 
 export default function Spin() {
@@ -60,6 +89,13 @@ export default function Spin() {
   const [sheetOpen, setSheetOpen] = useState(false)
   const [chrome, setChrome] = useState(true)
   const [pokeTick, setPokeTick] = useState(0)
+  const [dragY, setDragY] = useState(0)
+  const [grabbing, setGrabbing] = useState(false)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const handleRef = useRef<HTMLButtonElement>(null)
+  const grabY = useRef<number | null>(null)
+  const handleY = useRef(0)
+  const swiped = useRef(false)
   const noiseBuf = useRef<AudioBuffer | null>(null)
   const padRef = useRef<{ gain: GainNode; oscs: OscillatorNode[]; lfo: OscillatorNode } | null>(null)
   const noiseRef = useRef<{ gain: GainNode; src: AudioBufferSourceNode } | null>(null)
@@ -253,9 +289,16 @@ export default function Spin() {
     setChrome(true)
     if (ui !== 'auto') return
     const t1 = window.setTimeout(() => setChrome(false), 3500)
-    const t2 = sheetOpen ? window.setTimeout(() => setSheetOpen(false), 9000) : 0
+    const t2 = sheetOpen ? window.setTimeout(() => setSheetOpen(false), 20000) : 0
     return () => { clearTimeout(t1); if (t2) clearTimeout(t2) }
   }, [ui, sheetOpen, pokeTick])
+
+  useEffect(() => { // move focus into the sheet when it opens; hand it back to the handle when it closes
+    const d = dialogRef.current
+    if (!d) return
+    if (sheetOpen) d.focus({ preventScroll: true })
+    else if (d.contains(document.activeElement)) handleRef.current?.focus({ preventScroll: true })
+  }, [sheetOpen])
 
   useEffect(() => () => { // leaving the route must stop all sound
     const a = audio.current
@@ -299,7 +342,7 @@ export default function Spin() {
 
       // ---- draw (translucent fill leaves comet trails at speed)
       ctx.fillStyle = 'rgba(7,7,11,0.17)'; ctx.fillRect(0, 0, W, H)
-      st.cyFrac += ((st.sheetShown ? 0.31 : 0.46) - st.cyFrac) * Math.min(1, dt * 5) // ring lifts out of the way when the sheet is up
+      st.cyFrac += ((st.sheetShown ? 0.285 : 0.46) - st.cyFrac) * Math.min(1, dt * 5) // ring lifts out of the way when the sheet is up
       const cx = W / 2, cy = H * st.cyFrac
       const base = Math.min(W, H) * 0.25
       let b = 0.5 + 0.5 * Math.sin(time * 0.9) // idle breathing
@@ -426,8 +469,7 @@ export default function Spin() {
     if (now - st.lastT > 90) st.w *= 0.3 // held still before release: no flick
   }
 
-  const toggleMute = (e: React.PointerEvent) => {
-    e.stopPropagation()
+  const toggleMute = () => {
     const m = !s.current.muted
     s.current.muted = m; setMuted(m)
     const a = audio.current
@@ -441,26 +483,42 @@ export default function Spin() {
   const sheetShown = ui === 'always' || sheetOpen
   s.current.sheetShown = sheetShown
   const chromeShown = ui === 'always' || chrome || sheetOpen
-  const stop = (e: React.PointerEvent) => { e.stopPropagation(); setPokeTick((n) => n + 1) }
+  const poke = () => setPokeTick((n) => n + 1)
+  const stop = (e: React.PointerEvent) => { e.stopPropagation(); poke() }
   const hintBottom = sheetShown ? 360 : 170
 
+  // keyboard access to the spinner itself: arrows spin it, space adds a tone
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.target !== e.currentTarget) return
+    const st = s.current
+    poke(); ensureAudio()
+    if (e.key === 'ArrowRight') { st.w = Math.min(26, st.w + 3); setTouched(true); e.preventDefault() }
+    else if (e.key === 'ArrowLeft') { st.w = Math.max(-26, st.w - 3); setTouched(true); e.preventDefault() }
+    else if (e.key === ' ' || e.key === 'Enter') {
+      setTouched(true); addDrone(st.W * (0.2 + Math.random() * 0.6), st.H * (0.12 + Math.random() * 0.2), st.hue); e.preventDefault()
+    }
+  }
+
   return (
-    <div ref={wrap} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
+    <div ref={wrap} className="sp-root" tabIndex={0} role="application"
+      aria-label="Spinner. Arrow keys spin it. Space adds a tone."
+      onKeyDown={onKey} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
       style={{ position: 'fixed', inset: 0, background: '#07070b', overflow: 'hidden', touchAction: 'none', userSelect: 'none',
         fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif' }}>
-      <canvas ref={cvs} style={{ width: '100%', height: '100%', display: 'block' }} />
+      <style>{CSS}</style>
+      <canvas ref={cvs} aria-hidden="true" style={{ width: '100%', height: '100%', display: 'block' }} />
 
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: `calc(var(--safe-bottom) + ${hintBottom}px)`, textAlign: 'center',
-        color: '#fff', pointerEvents: 'none', opacity: touched ? 0 : 1, transition: 'opacity 1.2s ease-out, bottom .5s' }}>
+        color: '#fff', pointerEvents: 'none', opacity: touched || sheetShown ? 0 : 1, transition: 'opacity 1.2s ease-out, bottom .5s' }}>
         <div style={{ fontSize: 22, fontWeight: 200, letterSpacing: 1 }}>Flick to spin</div>
         <div style={{ fontSize: 13, opacity: 0.5, marginTop: 6 }}>Tap anywhere to add a tone</div>
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: `calc(var(--safe-bottom) + ${hintBottom}px)`, textAlign: 'center',
-        color: '#fff', fontSize: 22, fontWeight: 200, letterSpacing: 1, pointerEvents: 'none',
+      <div role="status" aria-live="polite" style={{ position: 'absolute', left: 0, right: 0, bottom: `calc(var(--safe-bottom) + ${hintBottom}px)`,
+        textAlign: 'center', color: '#fff', fontSize: 22, fontWeight: 200, letterSpacing: 1, pointerEvents: 'none',
         opacity: breathOn && !ended ? 0.85 : 0, transition: 'opacity 0.8s ease-out, bottom .5s' }}>
-        Breathe {phase}
+        {breathOn && !ended ? `Breathe ${phase}` : ''}
       </div>
-      <div style={{ position: 'absolute', inset: 0, background: '#07070b', pointerEvents: 'none',
+      <div aria-hidden={!ended} style={{ position: 'absolute', inset: 0, background: '#07070b', pointerEvents: 'none',
         opacity: ended ? 0.94 : 0, transition: `opacity ${FADE_S}s ease-in-out`, display: 'grid', placeItems: 'center' }}>
         <div style={{ color: '#fff', fontSize: 22, fontWeight: 200, letterSpacing: 1, opacity: ended ? 0.7 : 0,
           transition: `opacity ${FADE_S}s ease-in-out`, textAlign: 'center' }}>
@@ -468,24 +526,30 @@ export default function Spin() {
         </div>
       </div>
 
-      {/* quick actions: fade away when idle in auto-hide mode */}
+      {/* quick actions are toggle buttons: constant label, state in aria-pressed */}
       <div onPointerDown={stop} style={{ position: 'absolute', top: 'calc(var(--safe-top) + 8px)', left: 8, right: 8,
         display: 'flex', justifyContent: 'space-between', opacity: chromeShown ? 0.75 : 0,
-        pointerEvents: chromeShown ? 'auto' : 'none', transition: 'opacity .6s ease-out' }}>
-        <button aria-label={breathOn ? 'Stop breathing guide' : 'Start breathing guide'} aria-pressed={breathOn}
-          style={iconBtn(breathOn)}
-          onPointerDown={(e) => { e.stopPropagation(); ensureAudio(); setTouched(true); setPokeTick((n) => n + 1); setBreath(!s.current.breathOn) }}>
+        pointerEvents: chromeShown ? 'auto' : 'none', visibility: chromeShown ? 'visible' : 'hidden',
+        transition: `opacity .6s ease-out, visibility 0s linear ${chromeShown ? 0 : 0.6}s` }}>
+        <button type="button" className="sp-btn" aria-label="Breathing guide" aria-pressed={breathOn} style={iconBtn(breathOn)}
+          onClick={() => { ensureAudio(); setTouched(true); poke(); setBreath(!s.current.breathOn) }}>
           <BreatheIcon />
         </button>
-        <button aria-label={muted ? 'Turn sound on' : 'Turn sound off'} style={iconBtn(false)} onPointerDown={(e) => { stop(e); toggleMute(e) }}>
+        <button type="button" className="sp-btn" aria-label="Mute" aria-pressed={muted} style={iconBtn(false)}
+          onClick={() => { poke(); toggleMute() }}>
           <SoundIcon off={muted} />
         </button>
       </div>
 
-      {/* handle: the only thing visible at rest in auto-hide mode */}
+      {/* disclosure button: tap or Enter toggles, swipe up opens */}
       {ui === 'auto' && (
-        <button aria-label={sheetOpen ? 'Close settings' : 'Open settings'} aria-expanded={sheetOpen}
-          onPointerDown={(e) => { e.stopPropagation(); ensureAudio(); setSheetOpen((o) => !o); setPokeTick((n) => n + 1) }}
+        <button ref={handleRef} type="button" className="sp-btn" aria-label="Settings" aria-expanded={sheetOpen} aria-controls="spin-settings"
+          onPointerDown={(e) => { e.stopPropagation(); handleY.current = e.clientY; swiped.current = false }}
+          onPointerUp={(e) => {
+            e.stopPropagation()
+            if (e.clientY - handleY.current < -20) { swiped.current = true; ensureAudio(); setSheetOpen(true); poke() }
+          }}
+          onClick={() => { if (swiped.current) { swiped.current = false; return } ensureAudio(); setSheetOpen((o) => !o); poke() }}
           style={{ position: 'absolute', left: '50%', bottom: 'calc(var(--safe-bottom) + 96px)', width: 120, height: 44,
             transform: 'translateX(-50%)', border: 0, background: 'transparent', display: 'grid', placeItems: 'center',
             opacity: sheetOpen ? 0 : chromeShown ? 0.9 : 0.35, transition: 'opacity .5s', pointerEvents: sheetOpen ? 'none' : 'auto' }}>
@@ -493,38 +557,52 @@ export default function Spin() {
         </button>
       )}
 
-      {/* settings sheet: modal in auto-hide mode, docked in always mode */}
-      <div role="dialog" aria-label="Sound and display settings" aria-hidden={!sheetShown} onPointerDown={stop}
+      {/* settings: modal sheet in auto-hide mode (Esc or swipe down closes), docked in always mode */}
+      <div id="spin-settings" ref={dialogRef} role="dialog" aria-label="Settings" tabIndex={-1} onPointerDown={stop}
+        onKeyDown={(e) => { if (e.key === 'Escape' && ui === 'auto') { e.stopPropagation(); setSheetOpen(false) } }}
         style={{ position: 'absolute', left: 12, right: 12, bottom: 'calc(var(--safe-bottom) + 96px)', maxWidth: 420, margin: '0 auto',
-          padding: '4px 14px 14px', borderRadius: 28, color: '#fff', background: 'rgba(24,24,40,0.58)',
+          padding: '0 14px 12px', borderRadius: 28, color: '#fff', background: 'rgba(24,24,40,0.58)', outline: 'none',
           backdropFilter: 'blur(26px) saturate(1.3)', WebkitBackdropFilter: 'blur(26px) saturate(1.3)',
           border: '1px solid rgba(255,255,255,0.09)', boxShadow: '0 12px 50px rgba(0,0,0,0.45)',
-          transform: sheetShown ? 'translateY(0)' : 'translateY(calc(100% + 130px))', opacity: sheetShown ? 1 : 0,
-          pointerEvents: sheetShown ? 'auto' : 'none',
-          transition: 'transform .5s cubic-bezier(.2,.8,.2,1), opacity .35s ease-out' }}>
-        <div style={label}>Sound</div>
-        <div style={seg} role="group" aria-label="Instrument">
-          {VOICES.map((v) => (
-            <button key={v} aria-pressed={voice === v} style={{ ...segBtn(voice === v), textTransform: 'capitalize' }}
-              onPointerDown={(e) => { stop(e); ensureAudio(); setTouched(true); s.current.voice = v; setVoiceState(v); note(7) }}>
-              {v}
-            </button>
-          ))}
-        </div>
+          transform: sheetShown ? `translateY(${dragY}px)` : 'translateY(calc(100% + 130px))', opacity: sheetShown ? 1 : 0,
+          pointerEvents: sheetShown ? 'auto' : 'none', visibility: sheetShown ? 'visible' : 'hidden',
+          transition: grabbing ? 'none' : `transform .5s cubic-bezier(.2,.8,.2,1), opacity .35s ease-out, visibility 0s linear ${sheetShown ? 0 : 0.5}s` }}>
+        {ui === 'auto' ? (
+          <div aria-hidden="true" style={{ height: 28, display: 'grid', placeItems: 'center', touchAction: 'none', cursor: 'grab' }}
+            onPointerDown={(e) => { e.stopPropagation(); e.currentTarget.setPointerCapture(e.pointerId); grabY.current = e.clientY; setGrabbing(true); poke() }}
+            onPointerMove={(e) => { if (grabY.current !== null) setDragY(Math.max(0, e.clientY - grabY.current)) }}
+            onPointerUp={() => { const far = dragY > 60; grabY.current = null; setGrabbing(false); setDragY(0); if (far) setSheetOpen(false) }}
+            onPointerCancel={() => { grabY.current = null; setGrabbing(false); setDragY(0) }}>
+            <span style={{ width: 36, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.3)' }} />
+          </div>
+        ) : <div style={{ height: 6 }} />}
 
-        <div style={label}>Layers</div>
-        <div style={seg} role="group" aria-label="Ambient layers">
-          <button aria-pressed={padOn} style={segBtn(padOn)}
-            onPointerDown={(e) => { stop(e); ensureAudio(); setTouched(true); const n = !padOn; setPadOn(n); setPad(n) }}>Pad</button>
-          <button aria-pressed={noiseOn} style={segBtn(noiseOn)}
-            onPointerDown={(e) => { stop(e); ensureAudio(); setTouched(true); const n = !noiseOn; setNoiseOn(n); setNoise(n) }}>Air</button>
-        </div>
+        {/* choose one of four: radio group */}
+        <fieldset className="sp-fs">
+          <legend style={legend}>Sound</legend>
+          <div className="sp-seg">
+            {VOICES.map((v) => (
+              <label key={v}>
+                <input className="sp-radio" type="radio" name="voice" value={v} checked={voice === v}
+                  onChange={() => { ensureAudio(); setTouched(true); s.current.voice = v; setVoiceState(v); note(7) }} />
+                <span>{v}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
 
-        <div style={label}>Controls</div>
-        <div style={seg} role="group" aria-label="Controls visibility">
-          <button aria-pressed={ui === 'auto'} style={segBtn(ui === 'auto')} onPointerDown={(e) => { stop(e); setUi('auto'); setSheetOpen(false) }}>Auto-hide</button>
-          <button aria-pressed={ui === 'always'} style={segBtn(ui === 'always')} onPointerDown={(e) => { stop(e); setUi('always') }}>Always</button>
-        </div>
+        {/* independent on/off: switches */}
+        <fieldset className="sp-fs">
+          <legend style={legend}>Layers</legend>
+          <SwitchRow label="Pad" checked={padOn} onChange={(v) => { ensureAudio(); setTouched(true); setPadOn(v); setPad(v) }} />
+          <SwitchRow label="Air" checked={noiseOn} onChange={(v) => { ensureAudio(); setTouched(true); setNoiseOn(v); setNoise(v) }} />
+        </fieldset>
+
+        <fieldset className="sp-fs">
+          <legend style={legend}>Display</legend>
+          <SwitchRow label="Keep controls visible" checked={ui === 'always'}
+            onChange={(v) => { setUi(v ? 'always' : 'auto'); if (!v) setSheetOpen(false) }} />
+        </fieldset>
       </div>
     </div>
   )
