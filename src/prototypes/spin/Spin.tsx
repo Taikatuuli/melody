@@ -85,6 +85,8 @@ export default function Spin() {
   const [voice, setVoiceState] = useState<Voice>('bowl')
   const [padOn, setPadOn] = useState(false)
   const [noiseOn, setNoiseOn] = useState(false)
+  const [count, setCount] = useState(0)
+  const [cycles, setCycles] = useState(0)
   const [chrome, setChrome] = useState(true)
   const [pokeTick, setPokeTick] = useState(0)
   const noiseBuf = useRef<AudioBuffer | null>(null)
@@ -93,7 +95,7 @@ export default function Spin() {
 
   const s = useRef({
     rot: 0, w: 0.15, dragging: false, lastA: 0, lastT: 0,
-    pulse: new Float32Array(N), lastNote: 0, muted: false, voice: 'bowl' as Voice, lastTimbre: '' as Timbre | '', lastSemi: -1, cyFrac: 0.44, pid: -1, W: 0, H: 0,
+    pulse: new Float32Array(N), lastNote: 0, muted: false, voice: 'bowl' as Voice, lastTimbre: '' as Timbre | '', lastSemi: -1, cyFrac: 0.44, pid: -1, count: 0, cycleIdx: 0, flash: 0, W: 0, H: 0,
     drones: [] as Drone[], hue: 200, breathOn: false, breathT0: 0, ended: false, phase: 'in' as 'in' | 'out',
     down: { x: 0, y: 0, t: 0, moved: false },
   })
@@ -268,10 +270,24 @@ export default function Spin() {
     }
   }
 
+  // soft tone that rises on the in-breath and falls on the out-breath, so you can follow with your eyes closed
+  const breathCue = (dir: 1 | -1) => {
+    const a = audio.current
+    if (!a || s.current.muted) return
+    const t = a.ctx.currentTime, o = a.ctx.createOscillator(), g = a.ctx.createGain()
+    o.type = 'sine'
+    o.frequency.setValueAtTime(dir > 0 ? 220 : 330, t)
+    o.frequency.exponentialRampToValueAtTime(dir > 0 ? 330 : 220, t + 0.9)
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.045, t + 0.08); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.6)
+    o.connect(g); g.connect(a.master); o.start(t); o.stop(t + 1.7)
+  }
+
   const setBreath = (on: boolean) => {
     const st = s.current
     st.breathOn = on; st.ended = false; st.breathT0 = performance.now()
-    setBreathOn(on); setEnded(false)
+    st.phase = 'in'; st.cycleIdx = 0; st.flash = 0; st.count = 0
+    setBreathOn(on); setEnded(false); setPhase('in'); setCycles(0); setCount(0)
+    if (on) { ensureAudio(); breathCue(1) }
     const a = audio.current
     if (a) a.master.gain.setTargetAtTime(st.muted ? 0 : 0.9, a.ctx.currentTime, 0.3)
   }
@@ -330,12 +346,19 @@ export default function Spin() {
       let breath = 0.035, prog = 0
       if (st.breathOn) {
         const el = (now - st.breathT0) / 1000
-        const c = el % (IN_S + OUT_S)
-        b = c < IN_S ? ease(c / IN_S) : 1 - ease((c - IN_S) / OUT_S)
+        const CYC = IN_S + OUT_S // one breath in + one breath out = one full cycle = one full turn of the arc
+        const c = el % CYC
+        const cycleB = c < IN_S ? ease(c / IN_S) : 1 - ease((c - IN_S) / OUT_S)
+        const k = Math.min(1, el / 1.2) // ease out of the idle breathing into the first inhale
+        b = b * (1 - k) + cycleB * k
         breath = 0.12
-        prog = c / (IN_S + OUT_S)
+        prog = c / CYC
         const ph = c < IN_S ? 'in' : 'out'
-        if (ph !== st.phase) { st.phase = ph; setPhase(ph) }
+        if (ph !== st.phase) { st.phase = ph; setPhase(ph); breathCue(ph === 'in' ? 1 : -1); navigator.vibrate?.(8) }
+        const n = Math.ceil(c < IN_S ? IN_S - c : CYC - c) // seconds left in this phase
+        if (n !== st.count) { st.count = n; setCount(n) }
+        const ci = Math.floor(el / CYC)
+        if (ci !== st.cycleIdx) { st.cycleIdx = ci; st.flash = 1; setCycles(ci) } // a full breath just completed
         const a = audio.current
         if (a && !st.ended && !st.muted) a.master.gain.setTargetAtTime(0.55 + 0.45 * b, a.ctx.currentTime, 0.25) // sound swells with the breath
         if (!st.ended && el > SESSION_S) {
@@ -366,6 +389,13 @@ export default function Spin() {
       ctx.strokeStyle = `hsl(${hue} 60% 70% / 0.18)`; ctx.lineWidth = 1; ctx.stroke()
       if (st.breathOn && !st.ended) { // progress arc around one full breath cycle
         const a0p = -Math.PI / 2, a1p = a0p + prog * Math.PI * 2, rp = R * 1.14
+        st.flash = Math.max(0, st.flash - dt * 1.6)
+        ctx.beginPath(); ctx.arc(cx, cy, rp, 0, Math.PI * 2) // faint track: the whole cycle
+        ctx.strokeStyle = `hsl(${hue} 60% 75% / 0.12)`; ctx.lineWidth = 1.5; ctx.stroke()
+        if (st.flash > 0) { // soft flash when the circle closes
+          ctx.beginPath(); ctx.arc(cx, cy, rp, 0, Math.PI * 2)
+          ctx.strokeStyle = `hsl(${hue} 90% 82% / ${st.flash * 0.7})`; ctx.lineWidth = 2.5; ctx.stroke()
+        }
         ctx.beginPath(); ctx.arc(cx, cy, rp, a0p, a1p)
         ctx.strokeStyle = `hsl(${hue} 85% 78% / 0.55)`; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.stroke()
         ctx.beginPath(); ctx.arc(cx + Math.cos(a1p) * rp, cy + Math.sin(a1p) * rp, 3.5, 0, Math.PI * 2)
@@ -492,6 +522,12 @@ export default function Spin() {
         opacity: breathOn && !ended ? 0.85 : 0, transition: 'opacity 0.8s ease-out, bottom .5s' }}>
         {breathOn && !ended ? `Breathe ${phase}` : ''}
       </div>
+      <div aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, top: '44%', transform: 'translateY(-50%)', textAlign: 'center',
+        color: '#fff', fontSize: 56, fontWeight: 100, fontVariantNumeric: 'tabular-nums', pointerEvents: 'none',
+        opacity: breathOn && !ended ? 0.8 : 0, transition: 'opacity .8s ease-out' }}>{count || ''}</div>
+      <div aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, top: 'calc(var(--safe-top) + 22px)', textAlign: 'center',
+        color: '#fff', fontSize: 12, letterSpacing: 2.5, textTransform: 'uppercase', pointerEvents: 'none',
+        opacity: breathOn && !ended ? 0.55 : 0, transition: 'opacity .8s ease-out' }}>{cycles} {cycles === 1 ? 'breath' : 'breaths'}</div>
       <div aria-hidden={!ended} style={{ position: 'absolute', inset: 0, background: '#07070b', pointerEvents: 'none',
         opacity: ended ? 0.94 : 0, transition: `opacity ${FADE_S}s ease-in-out`, display: 'grid', placeItems: 'center' }}>
         <div style={{ color: '#fff', fontSize: 22, fontWeight: 200, letterSpacing: 1, opacity: ended ? 0.7 : 0,
