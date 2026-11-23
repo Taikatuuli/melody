@@ -8,7 +8,15 @@ const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
 type AudioBits = { ctx: AudioContext; master: GainNode }
 type Voice = 'bowl' | 'kalimba' | 'marimba' | 'drops'
 const VOICES: Voice[] = ['bowl', 'kalimba', 'marimba', 'drops']
-type Drone = { x: number; y: number; t0: number; color: string; gain: GainNode | null; kill: number; at: number; life: number; size: number }
+type Drone = { x: number; y: number; t0: number; tb: Timbre; semi: number; color: string; gain: GainNode | null; kill: number; at: number; life: number; size: number }
+// attack ripple per timbre: how many rings, how long each takes to expand (s), how far they travel (px)
+const RIPPLE: Record<Timbre, { rings: number; dur: number; reach: number; gap: number }> = {
+  bell: { rings: 1, dur: 0.9, reach: 64, gap: 0 },
+  warm: { rings: 1, dur: 1.6, reach: 54, gap: 0 },
+  choir: { rings: 3, dur: 2.4, reach: 70, gap: 0.45 },
+  breath: { rings: 2, dur: 2.2, reach: 60, gap: 0.8 },
+  sub: { rings: 1, dur: 3.2, reach: 100, gap: 0 },
+}
 // flat, matte palette: one background, one ink, one muted accent per instrument
 const BG = '#131318'
 const INK = '#ece9f5'
@@ -265,7 +273,7 @@ export default function Spin() {
       else env.connect(a.master)
       gain = env
     }
-    st.drones.push({ x, y, t0: performance.now(), color, gain, kill: 0, at, life, size })
+    st.drones.push({ x, y, t0: performance.now(), tb, semi, color, gain, kill: 0, at, life, size })
     if (st.drones.filter((d) => !d.kill).length > 6) {
       const old = st.drones.find((d) => !d.kill)!
       old.kill = performance.now()
@@ -399,14 +407,32 @@ export default function Spin() {
         ctx.fillStyle = INK; ctx.fill()
       }
 
-      st.drones = st.drones.filter((d) => { // tones: solid discs that swell in and shrink away
+      st.drones = st.drones.filter((d) => { // tones: a core dot (size = pitch), an attack ripple, and a decay arc (= life left)
         const age = Math.max(0, (now - d.t0) / 1000)
         let env = age < d.at ? age / d.at : Math.max(0, 1 - (age - d.at) / (d.life - d.at))
         if (d.kill) env *= Math.max(0, 1 - (now - d.kill) / 1000)
         if ((age > d.at || d.kill) && env <= 0.001) { d.gain?.disconnect(); return false }
-        const r = (8 + 20 * env + 2 * Math.sin(time * 1.3 + d.x)) * d.size
-        ctx.beginPath(); ctx.arc(d.x, d.y, r, 0, Math.PI * 2)
-        ctx.fillStyle = d.color; ctx.globalAlpha = 0.9 * Math.min(1, env * 3); ctx.fill(); ctx.globalAlpha = 1
+        const fade = d.kill ? Math.max(0, 1 - (now - d.kill) / 1000) : 1
+        const core = (11 - d.semi * 0.32) * d.size // low notes are bigger, high notes smaller
+        const rp = RIPPLE[d.tb]
+        ctx.lineCap = 'round'
+        for (let i = 0; i < rp.rings; i++) { // attack: rings expand once and fade
+          const t = (age - i * rp.gap) / rp.dur
+          if (t <= 0 || t >= 1) continue
+          const e = 1 - (1 - t) * (1 - t)
+          ctx.beginPath(); ctx.arc(d.x, d.y, core + e * rp.reach, 0, Math.PI * 2)
+          ctx.strokeStyle = d.color; ctx.lineWidth = 1.5; ctx.globalAlpha = (1 - t) * 0.7 * fade; ctx.stroke()
+        }
+        const ra = core + 9 // life: an arc that empties clockwise as the note fades
+        const left = d.kill ? 0 : Math.max(0, 1 - Math.max(0, age - d.at) / (d.life - d.at))
+        ctx.beginPath(); ctx.arc(d.x, d.y, ra, 0, Math.PI * 2)
+        ctx.strokeStyle = '#2b2b35'; ctx.lineWidth = 2; ctx.globalAlpha = fade; ctx.stroke()
+        if (left > 0.002) {
+          ctx.beginPath(); ctx.arc(d.x, d.y, ra, -Math.PI / 2, -Math.PI / 2 + left * Math.PI * 2)
+          ctx.strokeStyle = d.color; ctx.lineWidth = 2; ctx.globalAlpha = 0.9 * fade; ctx.stroke()
+        }
+        ctx.beginPath(); ctx.arc(d.x, d.y, core * (0.35 + 0.65 * Math.min(1, env * 2.5)), 0, Math.PI * 2) // dot swells in with the attack
+        ctx.fillStyle = d.color; ctx.globalAlpha = fade; ctx.fill(); ctx.globalAlpha = 1
         return true
       })
 
