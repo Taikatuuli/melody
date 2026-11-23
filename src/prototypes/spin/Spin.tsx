@@ -22,10 +22,23 @@ const TIMBRES: Record<Timbre, { at: number; life: number; peak: number; size: nu
 const IN_S = 4, OUT_S = 6 // breath: 4 in, 6 out
 const SESSION_S = Number(new URLSearchParams(location.search).get('s')) || 180
 const FADE_S = 8
-const chip = (on: boolean): React.CSSProperties => ({
-  height: 44, padding: '0 9px', border: 0, background: 'transparent', color: '#fff', opacity: on ? 1 : 0.4,
-  fontSize: 11, letterSpacing: 1.4, textTransform: 'uppercase',
-  boxShadow: on ? 'inset 0 -1px 0 rgba(255,255,255,0.8)' : 'inset 0 -1px 0 transparent',
+const iconProps = { width: 22, height: 22, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round' } as const
+const BreatheIcon = () => <svg {...iconProps}><circle cx="12" cy="12" r="3" /><circle cx="12" cy="12" r="8" opacity=".55" /></svg>
+const SoundIcon = ({ off }: { off: boolean }) => (
+  <svg {...iconProps}>
+    <path d="M4 10v4h3l5 4V6L7 10H4z" />
+    {off ? <path d="M16 9.5l5 5M21 9.5l-5 5" /> : <><path d="M15.5 9a4 4 0 010 6" /><path d="M18 6.5a8 8 0 010 11" opacity=".6" /></>}
+  </svg>
+)
+const iconBtn = (on: boolean): React.CSSProperties => ({
+  width: 44, height: 44, display: 'grid', placeItems: 'center', border: 0, borderRadius: 22, color: '#fff',
+  background: on ? 'rgba(255,255,255,0.14)' : 'transparent', transition: 'background .3s, opacity .5s',
+})
+const label: React.CSSProperties = { fontSize: 11, letterSpacing: 2, textTransform: 'uppercase', opacity: 0.45, margin: '16px 4px 8px' }
+const seg: React.CSSProperties = { display: 'flex', padding: 3, gap: 2, background: 'rgba(255,255,255,0.06)', borderRadius: 14 }
+const segBtn = (on: boolean): React.CSSProperties => ({
+  flex: 1, height: 38, border: 0, borderRadius: 11, fontSize: 13, letterSpacing: 0.3, color: '#fff',
+  background: on ? 'rgba(255,255,255,0.16)' : 'transparent', opacity: on ? 1 : 0.55, transition: 'background .25s, opacity .25s',
 })
 const ease = (x: number) => 0.5 - 0.5 * Math.cos(Math.PI * x) // smooth 0..1
 
@@ -41,13 +54,19 @@ export default function Spin() {
   const [voice, setVoiceState] = useState<Voice>('bowl')
   const [padOn, setPadOn] = useState(false)
   const [noiseOn, setNoiseOn] = useState(false)
+  const [ui, setUiState] = useState<'auto' | 'always'>(() => {
+    try { return localStorage.getItem('spin-ui') === 'always' ? 'always' : 'auto' } catch { return 'auto' }
+  })
+  const [sheetOpen, setSheetOpen] = useState(false)
+  const [chrome, setChrome] = useState(true)
+  const [pokeTick, setPokeTick] = useState(0)
   const noiseBuf = useRef<AudioBuffer | null>(null)
   const padRef = useRef<{ gain: GainNode; oscs: OscillatorNode[]; lfo: OscillatorNode } | null>(null)
   const noiseRef = useRef<{ gain: GainNode; src: AudioBufferSourceNode } | null>(null)
 
   const s = useRef({
     rot: 0, w: 0.15, dragging: false, lastA: 0, lastT: 0,
-    pulse: new Float32Array(N), lastNote: 0, muted: false, voice: 'bowl' as Voice, lastTimbre: '' as Timbre | '', lastSemi: -1, W: 0, H: 0,
+    pulse: new Float32Array(N), lastNote: 0, muted: false, voice: 'bowl' as Voice, lastTimbre: '' as Timbre | '', lastSemi: -1, cyFrac: 0.46, sheetShown: false, W: 0, H: 0,
     drones: [] as Drone[], hue: 200, breathOn: false, breathT0: 0, ended: false, phase: 'in' as 'in' | 'out',
     down: { x: 0, y: 0, t: 0, moved: false },
   })
@@ -230,6 +249,14 @@ export default function Spin() {
     if (a) a.master.gain.setTargetAtTime(st.muted ? 0 : 0.9, a.ctx.currentTime, 0.3)
   }
 
+  useEffect(() => { // auto-hide: controls fade after a few seconds of quiet, and the sheet closes itself
+    setChrome(true)
+    if (ui !== 'auto') return
+    const t1 = window.setTimeout(() => setChrome(false), 3500)
+    const t2 = sheetOpen ? window.setTimeout(() => setSheetOpen(false), 9000) : 0
+    return () => { clearTimeout(t1); if (t2) clearTimeout(t2) }
+  }, [ui, sheetOpen, pokeTick])
+
   useEffect(() => () => { // leaving the route must stop all sound
     const a = audio.current
     audio.current = null; padRef.current = null; noiseRef.current = null
@@ -272,15 +299,17 @@ export default function Spin() {
 
       // ---- draw (translucent fill leaves comet trails at speed)
       ctx.fillStyle = 'rgba(7,7,11,0.17)'; ctx.fillRect(0, 0, W, H)
-      const cx = W / 2, cy = H * 0.46
+      st.cyFrac += ((st.sheetShown ? 0.31 : 0.46) - st.cyFrac) * Math.min(1, dt * 5) // ring lifts out of the way when the sheet is up
+      const cx = W / 2, cy = H * st.cyFrac
       const base = Math.min(W, H) * 0.25
       let b = 0.5 + 0.5 * Math.sin(time * 0.9) // idle breathing
-      let breath = 0.035
+      let breath = 0.035, prog = 0
       if (st.breathOn) {
         const el = (now - st.breathT0) / 1000
         const c = el % (IN_S + OUT_S)
         b = c < IN_S ? ease(c / IN_S) : 1 - ease((c - IN_S) / OUT_S)
         breath = 0.12
+        prog = c / (IN_S + OUT_S)
         const ph = c < IN_S ? 'in' : 'out'
         if (ph !== st.phase) { st.phase = ph; setPhase(ph) }
         const a = audio.current
@@ -293,7 +322,7 @@ export default function Spin() {
       const nz = noiseRef.current, an = audio.current
       if (nz && an) nz.gain.gain.setTargetAtTime(0.012 + Math.min(Math.abs(st.w) / 22, 1) * 0.05 + (st.breathOn ? 0.03 * b : 0), an.ctx.currentTime, 0.15)
       const R = base * (1 + breath * (b - 0.5) * 2)
-      const hue = (time * 5 + 200) % 360
+      const hue = 245 + 75 * Math.sin(time * 0.06) // drifts teal → indigo → magenta; never muddy greens or yellows
       st.hue = hue
 
       const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 2.1)
@@ -311,6 +340,13 @@ export default function Spin() {
       }
       ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2)
       ctx.strokeStyle = `hsl(${hue} 60% 70% / 0.18)`; ctx.lineWidth = 1; ctx.stroke()
+      if (st.breathOn && !st.ended) { // progress arc around one full breath cycle
+        const a0p = -Math.PI / 2, a1p = a0p + prog * Math.PI * 2, rp = R * 1.14
+        ctx.beginPath(); ctx.arc(cx, cy, rp, a0p, a1p)
+        ctx.strokeStyle = `hsl(${hue} 85% 78% / 0.55)`; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.stroke()
+        ctx.beginPath(); ctx.arc(cx + Math.cos(a1p) * rp, cy + Math.sin(a1p) * rp, 3.5, 0, Math.PI * 2)
+        ctx.fillStyle = `hsl(${hue} 90% 85%)`; ctx.fill()
+      }
 
       st.drones = st.drones.filter((d) => {
         const age = Math.max(0, (now - d.t0) / 1000)
@@ -330,8 +366,8 @@ export default function Spin() {
         const ang = st.rot + i * STEP, p = st.pulse[i]
         const x = cx + Math.cos(ang) * R, y = cy + Math.sin(ang) * R
         ctx.beginPath(); ctx.arc(x, y, 6 + p * 7, 0, Math.PI * 2)
-        ctx.fillStyle = `hsl(${hue + i * 7} 85% ${68 + p * 22}%)`
-        ctx.shadowColor = `hsl(${hue + i * 7} 90% 65%)`; ctx.shadowBlur = 14 + p * 34
+        ctx.fillStyle = `hsl(${hue + i * 3} 85% ${68 + p * 22}%)`
+        ctx.shadowColor = `hsl(${hue + i * 3} 90% 65%)`; ctx.shadowBlur = 14 + p * 34
         ctx.fill(); ctx.shadowBlur = 0
       }
       ctx.beginPath(); ctx.arc(cx, cy, 2.5, 0, Math.PI * 2)
@@ -346,15 +382,17 @@ export default function Spin() {
 
   const pointerAngle = (e: React.PointerEvent) => {
     const r = wrap.current!.getBoundingClientRect()
-    return Math.atan2(e.clientY - (r.top + s.current.H * 0.46), e.clientX - (r.left + s.current.W / 2))
+    return Math.atan2(e.clientY - (r.top + s.current.H * s.current.cyFrac), e.clientX - (r.left + s.current.W / 2))
   }
   const down = (e: React.PointerEvent) => {
-    ensureAudio(); setTouched(true)
+    ensureAudio(); setTouched(true); setPokeTick((n) => n + 1)
+    const closing = sheetOpen && ui === 'auto'
+    if (closing) setSheetOpen(false)
     const st = s.current
     wrap.current!.setPointerCapture(e.pointerId)
     st.dragging = true; st.lastA = pointerAngle(e); st.lastT = performance.now()
     const r = wrap.current!.getBoundingClientRect()
-    st.down = { x: e.clientX - r.left, y: e.clientY - r.top, t: performance.now(), moved: false }
+    st.down = { x: e.clientX - r.left, y: e.clientY - r.top, t: performance.now(), moved: closing } // a tap that only closes the sheet adds no tone
     if (st.ended && performance.now() - st.breathT0 > (SESSION_S + 3) * 1000) setBreath(true) // tap to begin again
   }
   const move = (e: React.PointerEvent) => {
@@ -396,58 +434,98 @@ export default function Spin() {
     if (a) a.master.gain.setTargetAtTime(m ? 0 : 0.9, a.ctx.currentTime, 0.1) // silences pad and noise too
   }
 
+  const setUi = (v: 'auto' | 'always') => {
+    setUiState(v)
+    try { localStorage.setItem('spin-ui', v) } catch { /* private mode */ }
+  }
+  const sheetShown = ui === 'always' || sheetOpen
+  s.current.sheetShown = sheetShown
+  const chromeShown = ui === 'always' || chrome || sheetOpen
+  const stop = (e: React.PointerEvent) => { e.stopPropagation(); setPokeTick((n) => n + 1) }
+  const hintBottom = sheetShown ? 360 : 170
+
   return (
     <div ref={wrap} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
-      style={{ position: 'fixed', inset: 0, background: '#07070b', overflow: 'hidden', touchAction: 'none', userSelect: 'none' }}>
+      style={{ position: 'fixed', inset: 0, background: '#07070b', overflow: 'hidden', touchAction: 'none', userSelect: 'none',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif' }}>
       <canvas ref={cvs} style={{ width: '100%', height: '100%', display: 'block' }} />
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 'calc(var(--safe-bottom) + 230px)', textAlign: 'center',
-        color: '#fff', fontSize: 13, letterSpacing: 4, textTransform: 'uppercase', pointerEvents: 'none',
-        opacity: touched ? 0 : 0.55, transition: 'opacity 1.2s ease-out' }}>
-        Flick to spin<div style={{ fontSize: 11, letterSpacing: 3, opacity: 0.7, marginTop: 8 }}>Tap to add a tone</div>
+
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: `calc(var(--safe-bottom) + ${hintBottom}px)`, textAlign: 'center',
+        color: '#fff', pointerEvents: 'none', opacity: touched ? 0 : 1, transition: 'opacity 1.2s ease-out, bottom .5s' }}>
+        <div style={{ fontSize: 22, fontWeight: 200, letterSpacing: 1 }}>Flick to spin</div>
+        <div style={{ fontSize: 13, opacity: 0.5, marginTop: 6 }}>Tap anywhere to add a tone</div>
       </div>
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 'calc(var(--safe-bottom) + 230px)', textAlign: 'center',
-        color: '#fff', fontSize: 15, letterSpacing: 5, textTransform: 'uppercase', pointerEvents: 'none',
-        opacity: breathOn && !ended ? 0.7 : 0, transition: 'opacity 0.8s ease-out' }}>
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: `calc(var(--safe-bottom) + ${hintBottom}px)`, textAlign: 'center',
+        color: '#fff', fontSize: 22, fontWeight: 200, letterSpacing: 1, pointerEvents: 'none',
+        opacity: breathOn && !ended ? 0.85 : 0, transition: 'opacity 0.8s ease-out, bottom .5s' }}>
         Breathe {phase}
       </div>
       <div style={{ position: 'absolute', inset: 0, background: '#07070b', pointerEvents: 'none',
         opacity: ended ? 0.94 : 0, transition: `opacity ${FADE_S}s ease-in-out`, display: 'grid', placeItems: 'center' }}>
-        <div style={{ color: '#fff', fontSize: 13, letterSpacing: 6, textTransform: 'uppercase', opacity: ended ? 0.6 : 0,
-          transition: `opacity ${FADE_S}s ease-in-out` }}>Rest · tap to continue</div>
+        <div style={{ color: '#fff', fontSize: 22, fontWeight: 200, letterSpacing: 1, opacity: ended ? 0.7 : 0,
+          transition: `opacity ${FADE_S}s ease-in-out`, textAlign: 'center' }}>
+          Rest<div style={{ fontSize: 13, opacity: 0.55, marginTop: 8, fontWeight: 400 }}>Tap to continue</div>
+        </div>
       </div>
-      <div onPointerDown={(e) => e.stopPropagation()}
-        style={{ position: 'absolute', left: 0, right: 0, bottom: 'calc(var(--safe-bottom) + 100px)',
-          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-        <div style={{ display: 'flex', justifyContent: 'center' }}>
+
+      {/* quick actions: fade away when idle in auto-hide mode */}
+      <div onPointerDown={stop} style={{ position: 'absolute', top: 'calc(var(--safe-top) + 8px)', left: 8, right: 8,
+        display: 'flex', justifyContent: 'space-between', opacity: chromeShown ? 0.75 : 0,
+        pointerEvents: chromeShown ? 'auto' : 'none', transition: 'opacity .6s ease-out' }}>
+        <button aria-label={breathOn ? 'Stop breathing guide' : 'Start breathing guide'} aria-pressed={breathOn}
+          style={iconBtn(breathOn)}
+          onPointerDown={(e) => { e.stopPropagation(); ensureAudio(); setTouched(true); setPokeTick((n) => n + 1); setBreath(!s.current.breathOn) }}>
+          <BreatheIcon />
+        </button>
+        <button aria-label={muted ? 'Turn sound on' : 'Turn sound off'} style={iconBtn(false)} onPointerDown={(e) => { stop(e); toggleMute(e) }}>
+          <SoundIcon off={muted} />
+        </button>
+      </div>
+
+      {/* handle: the only thing visible at rest in auto-hide mode */}
+      {ui === 'auto' && (
+        <button aria-label={sheetOpen ? 'Close settings' : 'Open settings'} aria-expanded={sheetOpen}
+          onPointerDown={(e) => { e.stopPropagation(); ensureAudio(); setSheetOpen((o) => !o); setPokeTick((n) => n + 1) }}
+          style={{ position: 'absolute', left: '50%', bottom: 'calc(var(--safe-bottom) + 96px)', width: 120, height: 44,
+            transform: 'translateX(-50%)', border: 0, background: 'transparent', display: 'grid', placeItems: 'center',
+            opacity: sheetOpen ? 0 : chromeShown ? 0.9 : 0.35, transition: 'opacity .5s', pointerEvents: sheetOpen ? 'none' : 'auto' }}>
+          <span style={{ width: 40, height: 4, borderRadius: 2, background: '#fff' }} />
+        </button>
+      )}
+
+      {/* settings sheet: modal in auto-hide mode, docked in always mode */}
+      <div role="dialog" aria-label="Sound and display settings" aria-hidden={!sheetShown} onPointerDown={stop}
+        style={{ position: 'absolute', left: 12, right: 12, bottom: 'calc(var(--safe-bottom) + 96px)', maxWidth: 420, margin: '0 auto',
+          padding: '4px 14px 14px', borderRadius: 28, color: '#fff', background: 'rgba(24,24,40,0.58)',
+          backdropFilter: 'blur(26px) saturate(1.3)', WebkitBackdropFilter: 'blur(26px) saturate(1.3)',
+          border: '1px solid rgba(255,255,255,0.09)', boxShadow: '0 12px 50px rgba(0,0,0,0.45)',
+          transform: sheetShown ? 'translateY(0)' : 'translateY(calc(100% + 130px))', opacity: sheetShown ? 1 : 0,
+          pointerEvents: sheetShown ? 'auto' : 'none',
+          transition: 'transform .5s cubic-bezier(.2,.8,.2,1), opacity .35s ease-out' }}>
+        <div style={label}>Sound</div>
+        <div style={seg} role="group" aria-label="Instrument">
           {VOICES.map((v) => (
-            <button key={v} aria-pressed={voice === v} style={chip(voice === v)}
-              onPointerDown={(e) => {
-                e.stopPropagation(); ensureAudio(); setTouched(true)
-                s.current.voice = v; setVoiceState(v); note(7) // preview the new voice right away
-              }}>{v}</button>
+            <button key={v} aria-pressed={voice === v} style={{ ...segBtn(voice === v), textTransform: 'capitalize' }}
+              onPointerDown={(e) => { stop(e); ensureAudio(); setTouched(true); s.current.voice = v; setVoiceState(v); note(7) }}>
+              {v}
+            </button>
           ))}
         </div>
-        <div style={{ display: 'flex', justifyContent: 'center' }}>
-          <button aria-pressed={padOn} style={chip(padOn)}
-            onPointerDown={(e) => { e.stopPropagation(); ensureAudio(); setTouched(true); const n = !padOn; setPadOn(n); setPad(n) }}>
-            + Pad</button>
-          <button aria-pressed={noiseOn} style={chip(noiseOn)}
-            onPointerDown={(e) => { e.stopPropagation(); ensureAudio(); setTouched(true); const n = !noiseOn; setNoiseOn(n); setNoise(n) }}>
-            + Air</button>
+
+        <div style={label}>Layers</div>
+        <div style={seg} role="group" aria-label="Ambient layers">
+          <button aria-pressed={padOn} style={segBtn(padOn)}
+            onPointerDown={(e) => { stop(e); ensureAudio(); setTouched(true); const n = !padOn; setPadOn(n); setPad(n) }}>Pad</button>
+          <button aria-pressed={noiseOn} style={segBtn(noiseOn)}
+            onPointerDown={(e) => { stop(e); ensureAudio(); setTouched(true); const n = !noiseOn; setNoiseOn(n); setNoise(n) }}>Air</button>
+        </div>
+
+        <div style={label}>Controls</div>
+        <div style={seg} role="group" aria-label="Controls visibility">
+          <button aria-pressed={ui === 'auto'} style={segBtn(ui === 'auto')} onPointerDown={(e) => { stop(e); setUi('auto'); setSheetOpen(false) }}>Auto-hide</button>
+          <button aria-pressed={ui === 'always'} style={segBtn(ui === 'always')} onPointerDown={(e) => { stop(e); setUi('always') }}>Always</button>
         </div>
       </div>
-      <button onPointerDown={(e) => { e.stopPropagation(); ensureAudio(); setTouched(true); setBreath(!s.current.breathOn) }}
-        aria-pressed={breathOn}
-        style={{ position: 'absolute', top: 'calc(var(--safe-top) + 12px)', left: 12, height: 44, padding: '0 8px', border: 0,
-          background: 'transparent', color: '#fff', opacity: breathOn ? 0.95 : 0.55, fontSize: 12, letterSpacing: 1.5,
-          textTransform: 'uppercase' }}>
-        Breathe
-      </button>
-      <button onPointerDown={toggleMute} aria-label={muted ? 'Turn sound on' : 'Turn sound off'}
-        style={{ position: 'absolute', top: 'calc(var(--safe-top) + 12px)', right: 12, width: 44, height: 44, border: 0,
-          background: 'transparent', color: '#fff', opacity: 0.55, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>
-        {muted ? 'Off' : 'On'}
-      </button>
     </div>
   )
 }
