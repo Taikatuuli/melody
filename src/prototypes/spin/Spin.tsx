@@ -50,7 +50,7 @@ const VOICE_ICONS: Record<Voice, React.ReactElement> = {
   bowl: <svg {...vIcon}><path d="M3.5 11h17c0 4.4-3.8 7.5-8.5 7.5S3.5 15.4 3.5 11z" /><path d="M9 21h6" /><path d="M8.5 6.8q3.5-3 7 0" opacity=".6" /></svg>,
   kalimba: <svg {...vIcon}><rect x="5" y="3.5" width="14" height="17" rx="3.5" /><path d="M9 8v8M12 8v10M15 8v7" /></svg>,
   marimba: <svg {...vIcon} strokeWidth="2.4"><path d="M4 7h16M6 12h12M8 17h8" /></svg>,
-  drops: <svg {...vIcon}><path d="M12 3.5c4.2 0 7 2.6 7 6 0 3.8-3.2 8-7 10.5-3.8-2.5-7-6.7-7-10.5 0-3.4 2.8-6 7-6z" /><path d="M7.6 9.6c1.5 0 2.8.7 3.5 1.9M16.4 9.6c-1.5 0-2.8.7-3.5 1.9" /></svg>,
+  drops: <svg {...vIcon}><path d="M4.5 18.5c3.2-.3 3.6-3.8 5.6-6 1.4-1.6 3.4-2.2 4-4.4.5-2-1-3.8-3.2-3.4C7.6 5.3 6 9 5.6 12.2c-.3 2.4-.6 4.3-1.1 6.3z" /></svg>,
 }
 const LookIcon = () => <svg {...iconProps}><path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.4 0 2-1 1.6-2.1-.4-1.2.3-2.4 1.6-2.4H17a3.5 3.5 0 0 0 3.5-3.6C20.5 7.2 16.8 3.5 12 3.5z" /><circle cx="7.8" cy="11.2" r=".9" fill="currentColor" stroke="none" /><circle cx="10.4" cy="7.4" r=".9" fill="currentColor" stroke="none" /><circle cx="14.8" cy="7.6" r=".9" fill="currentColor" stroke="none" /></svg>
 const iconBtn = (on: boolean): React.CSSProperties => ({
@@ -339,7 +339,7 @@ export default function Spin() {
 
       const dirw = st.w >= 0 ? 1 : -1, streak = Math.min(Math.abs(st.w) * 0.045, 0.75), r0 = dotSize(N)
       // one dot in the chosen shape, centred at (x, y) and pointing outward along `ang`
-      const drawDot = (x: number, y: number, ang: number, r: number, color: string, alpha: number) => {
+      const drawDot = (x: number, y: number, ang: number, r: number, color: string, alpha: number, ph = 0) => {
         const ca = Math.cos(ang), sa = Math.sin(ang)
         ctx.globalAlpha = alpha; ctx.fillStyle = color; ctx.strokeStyle = color
         ctx.beginPath()
@@ -350,20 +350,22 @@ export default function Spin() {
           case 'marimba': // thick, shorter bars
             ctx.moveTo(x - ca * r * 1.5, y - sa * r * 1.5); ctx.lineTo(x + ca * r * 1.5, y + sa * r * 1.5)
             ctx.lineWidth = r * 1.4; ctx.lineCap = 'round'; ctx.stroke(); break
-          case 'drops': { // a little alien: wide head, pointed chin toward the middle, two slanted eyes
-            const tx = -sa, ty = ca // tangent
-            const rh = r * 1.45, hx = x + ca * r * 0.45, hy = y + sa * r * 0.45 // head centre
-            ctx.ellipse(hx, hy, rh * 1.12, rh * 0.95, ang + Math.PI / 2, 0, Math.PI * 2); ctx.fill()
-            ctx.beginPath(); ctx.moveTo(hx + tx * rh * 1.05, hy + ty * rh * 1.05)
-            ctx.lineTo(hx - ca * rh * 2, hy - sa * rh * 2); ctx.lineTo(hx - tx * rh * 1.05, hy - ty * rh * 1.05); ctx.closePath(); ctx.fill()
-            ctx.fillStyle = st.th.bg // eyes are cut out of the head
-            for (const side of [1, -1]) {
-              ctx.beginPath()
-              ctx.ellipse(hx + tx * side * rh * 0.5 - ca * rh * 0.05, hy + ty * side * rh * 0.5 - sa * rh * 0.05, rh * 0.42, rh * 0.17,
-                ang + Math.PI / 2 + side * 0.5, 0, Math.PI * 2)
-              ctx.fill()
-            }
-            break
+          case 'drops': { // an organic water form: a lopsided blob with a curling tail toward the middle, slowly wobbling
+            const w1 = 1 + 0.1 * Math.sin(time * 1.3 + ph), w2 = 1 + 0.14 * Math.sin(time * 1.7 + ph * 1.3 + 1)
+            const R = r * 1.15
+            // (u, v): u runs outward along the ring's radius, v across it
+            const P = (u: number, v: number): [number, number] => [x + (ca * u - sa * v) * R, y + (sa * u + ca * v) * R]
+            const T = P(-2.3 * w2, 0.65 * w2) // curling tail tip
+            ctx.moveTo(T[0], T[1])
+            const a1 = P(-1.5, 0.05), a2 = P(-0.9, -1.15 * w1), a3 = P(0.1, -1.2 * w1)
+            ctx.bezierCurveTo(a1[0], a1[1], a2[0], a2[1], a3[0], a3[1])
+            const b1 = P(0.9 * w1, -1.3 * w1), b2 = P(1.75 * w1, -0.7), b3 = P(1.55 * w1, 0.05)
+            ctx.bezierCurveTo(b1[0], b1[1], b2[0], b2[1], b3[0], b3[1])
+            const c1 = P(1.4 * w1, 0.95), c2 = P(0.95, 1.5 * w1), c3 = P(0.1, 1.3 * w1)
+            ctx.bezierCurveTo(c1[0], c1[1], c2[0], c2[1], c3[0], c3[1])
+            const d1 = P(-0.7, 1.1), d2 = P(-1.5, 1.2 * w2), d3 = T
+            ctx.bezierCurveTo(d1[0], d1[1], d2[0], d2[1], d3[0], d3[1])
+            ctx.closePath(); ctx.fill(); break
           }
           default: ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill() // bowl: a filled circle
         }
@@ -377,8 +379,8 @@ export default function Spin() {
           ctx.strokeStyle = accent; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.globalAlpha = 0.45; ctx.stroke(); ctx.globalAlpha = 1
         }
         const x = cx + Math.cos(ang) * R, y = cy + Math.sin(ang) * R
-        drawDot(x, y, ang, r, accent, 1)
-        if (p > 0.02) drawDot(x, y, ang, r, th.ink, p) // a passing detent lights the dot up
+        drawDot(x, y, ang, r, accent, 1, i * 0.9)
+        if (p > 0.02) drawDot(x, y, ang, r, th.ink, p, i * 0.9) // a passing detent lights the dot up
       }
       ctx.beginPath(); ctx.arc(cx, cy, 2.5, 0, Math.PI * 2)
       ctx.fillStyle = th.hub; ctx.fill()
