@@ -6,7 +6,7 @@ const spiralTaper = (u: number) => Math.pow(Math.sin(Math.PI * u), 0.5) // dots 
 const SCALE = [0, 2, 4, 7, 9] // major pentatonic: every combination sounds consonant
 const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
 
-type AudioBits = { ctx: AudioContext; master: GainNode }
+type AudioBits = { ctx: AudioContext; master: GainNode; fb: GainNode } // fb = how much of each echo feeds the next
 type Voice = 'bowl' | 'kalimba' | 'marimba' | 'drops' | 'ripple'
 const VOICES: Voice[] = ['bowl', 'kalimba', 'marimba', 'drops', 'ripple']
 const VOICE_LABELS: Record<Voice, string> = { bowl: 'Bowl', kalimba: 'Kalimba', marimba: 'Marimba', drops: 'Drops', ripple: 'Ripple' }
@@ -162,12 +162,12 @@ export default function Spin() {
     if (!Ctx) return
     const ctx = new Ctx()
     const master = ctx.createGain(); master.gain.value = 0.9
-    const delay = ctx.createDelay(1); delay.delayTime.value = 0.38
-    const fb = ctx.createGain(); fb.gain.value = 0.4
-    const wet = ctx.createGain(); wet.gain.value = 0.45
+    const delay = ctx.createDelay(1); delay.delayTime.value = 0.3
+    const fb = ctx.createGain(); fb.gain.value = 0.1
+    const wet = ctx.createGain(); wet.gain.value = 0.38
     master.connect(ctx.destination)
     master.connect(delay); delay.connect(fb); fb.connect(delay); delay.connect(wet); wet.connect(ctx.destination)
-    audio.current = { ctx, master }
+    audio.current = { ctx, master, fb }
     const blip = ctx.createBufferSource(); blip.buffer = ctx.createBuffer(1, 1, 22050); blip.connect(ctx.destination); blip.start(0) // a silent blip: the usual trick to unlock iOS audio
     void ctx.resume()
   }
@@ -458,6 +458,8 @@ export default function Spin() {
         }
       }
       const nz = noiseRef.current, an = audio.current
+      // the echo shortens as the spinner slows: a lively tail while it spins, and only a repeat or two once it's nearly stopped
+      if (an) an.fb.gain.setTargetAtTime(0.1 + 0.2 * Math.min(Math.abs(st.w) / 8, 1), an.ctx.currentTime, 0.2)
       const oc = oceanRef.current
       if (oc?.mod && an) oc.mod.gain.setTargetAtTime(st.breathOn ? 0.45 + 0.55 * b : 1, an.ctx.currentTime, 0.25) // with the breath guide on, the waves rise and fall with your breathing
       if (nz && an) nz.gain.gain.setTargetAtTime(0.012 + Math.min(Math.abs(st.w) / 22, 1) * 0.05 + (st.breathOn ? 0.03 * b : 0), an.ctx.currentTime, 0.15)
