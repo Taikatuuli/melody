@@ -1,17 +1,54 @@
 import { useEffect, useRef, useState } from 'react'
 
-const N = 12 // nodes (and detents) on the spinner
-const STEP = (Math.PI * 2) / N
+const MAX_N = 24 // most nodes (and detents) the spinner can have
 const SCALE = [0, 2, 4, 7, 9] // major pentatonic: every combination sounds consonant
 const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
 
 type AudioBits = { ctx: AudioContext; master: GainNode }
 type Voice = 'bowl' | 'kalimba' | 'marimba' | 'drops'
 const VOICES: Voice[] = ['bowl', 'kalimba', 'marimba', 'drops']
-// flat, matte palette: one background, one ink, one muted accent per instrument
-const BG = '#131318'
-const INK = '#ece9f5'
-const ACCENTS: Record<Voice, string> = { bowl: '#a79fe3', kalimba: '#dcbf90', marimba: '#dc9fac', drops: '#8ab2de' }
+// ---- looks you can try: palette, dot count, dot shape, font
+type Theme = {
+  name: string; bg: string; ink: string; ring: string; dust: [string, string, string]; hub: string
+  pill: string; pillBorder: string; pillText: string; pressed: string; accents: Record<Voice, string>
+}
+const THEMES = {
+  charcoal: { name: 'Charcoal', bg: '#131318', ink: '#ece9f5', ring: '#33333f', dust: ['#3d3d4a', '#31313c', '#272731'], hub: '#5a5a69',
+    pill: '#1b1b22', pillBorder: '#2b2b35', pillText: '#a3a1b4', pressed: '#25252e',
+    accents: { bowl: '#a79fe3', kalimba: '#dcbf90', marimba: '#dc9fac', drops: '#8ab2de' } },
+  paper: { name: 'Paper', bg: '#efe9dd', ink: '#2b2824', ring: '#cfc6b4', dust: ['#c3b9a5', '#d0c7b4', '#dad2c1'], hub: '#9d937f',
+    pill: '#e5ddcd', pillBorder: '#d3c9b4', pillText: '#6d665a', pressed: '#e0d7c4',
+    accents: { bowl: '#b5654a', kalimba: '#c4973f', marimba: '#6e8f73', drops: '#3f5e86' } },
+  dusk: { name: 'Dusk', bg: '#1b1836', ink: '#f6d9bf', ring: '#3b3766', dust: ['#47427a', '#393564', '#2e2b52'], hub: '#6f69a8',
+    pill: '#25214a', pillBorder: '#35306a', pillText: '#b5a9d6', pressed: '#2d2959',
+    accents: { bowl: '#f0a58a', kalimba: '#f4cf9a', marimba: '#e8899a', drops: '#c9a8e6' } },
+  moss: { name: 'Moss', bg: '#16201b', ink: '#e6ead9', ring: '#2e3d35', dust: ['#3a4b41', '#2f3e36', '#26332c'], hub: '#5d7266',
+    pill: '#1d2924', pillBorder: '#2c3b34', pillText: '#9fb0a4', pressed: '#25332c',
+    accents: { bowl: '#9cc4a0', kalimba: '#d6c58a', marimba: '#d99e8a', drops: '#8fb8c9' } },
+  mono: { name: 'Mono', bg: '#0d0d0d', ink: '#f4f4f4', ring: '#333333', dust: ['#3a3a3a', '#2c2c2c', '#222222'], hub: '#666666',
+    pill: '#171717', pillBorder: '#2a2a2a', pillText: '#9a9a9a', pressed: '#222222',
+    accents: { bowl: '#f4f4f4', kalimba: '#f4f4f4', marimba: '#f4f4f4', drops: '#f4f4f4' } },
+} satisfies Record<string, Theme>
+type ThemeId = keyof typeof THEMES
+const THEME_IDS = Object.keys(THEMES) as ThemeId[]
+const COUNTS = [6, 8, 12, 18, 24]
+type Shape = 'circle' | 'bar' | 'petal' | 'diamond' | 'ring'
+const SHAPES: Shape[] = ['circle', 'bar', 'petal', 'diamond', 'ring']
+type FontId = 'sans' | 'serif'
+const FONTS: Record<FontId, { name: string; stack: string; weight: number }> = {
+  sans: { name: 'Sans', stack: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif', weight: 200 },
+  serif: { name: 'Serif', stack: 'ui-serif, "New York", "Iowan Old Style", Georgia, "Times New Roman", serif', weight: 300 },
+}
+const dotSize = (n: number) => Math.max(3, Math.min(10, 21 / Math.sqrt(n))) // fewer dots are bigger, more dots smaller
+const LOOK_KEY = 'spin-look'
+const readLook = (): { theme: ThemeId; n: number; shape: Shape; font: FontId } => {
+  const d = { theme: 'charcoal' as ThemeId, n: 12, shape: 'circle' as Shape, font: 'sans' as FontId }
+  try {
+    const j = JSON.parse(localStorage.getItem(LOOK_KEY) || '{}')
+    return { theme: j.theme in THEMES ? j.theme : d.theme, n: COUNTS.includes(j.n) ? j.n : d.n,
+      shape: SHAPES.includes(j.shape) ? j.shape : d.shape, font: j.font in FONTS ? j.font : d.font }
+  } catch { return d }
+}
 const IN_S = 4, OUT_S = 6 // breath: 4 in, 6 out
 const SESSION_S = Number(new URLSearchParams(location.search).get('s')) || 180
 const FADE_S = 8
@@ -30,28 +67,43 @@ const VOICE_ICONS: Record<Voice, React.ReactElement> = {
   marimba: <svg {...vIcon} strokeWidth="2.4"><path d="M4 7h16M6 12h12M8 17h8" /></svg>,
   drops: <svg {...vIcon}><path d="M12 3.5c3.6 4.4 6 7.2 6 10a6 6 0 0 1-12 0c0-2.8 2.4-5.6 6-10z" /></svg>,
 }
+const LookIcon = () => <svg {...iconProps}><path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.4 0 2-1 1.6-2.1-.4-1.2.3-2.4 1.6-2.4H17a3.5 3.5 0 0 0 3.5-3.6C20.5 7.2 16.8 3.5 12 3.5z" /><circle cx="7.8" cy="11.2" r=".9" fill="currentColor" stroke="none" /><circle cx="10.4" cy="7.4" r=".9" fill="currentColor" stroke="none" /><circle cx="14.8" cy="7.6" r=".9" fill="currentColor" stroke="none" /></svg>
+const SHAPE_GLYPHS: Record<Shape, React.ReactElement> = {
+  circle: <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="4.6" fill="currentColor" /></svg>,
+  bar: <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M9 2.5v13" stroke="currentColor" strokeWidth="4" strokeLinecap="round" /></svg>,
+  petal: <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><ellipse cx="9" cy="9" rx="3.2" ry="7" fill="currentColor" /></svg>,
+  diamond: <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M9 1.8l4.6 7.2L9 16.2 4.4 9z" fill="currentColor" /></svg>,
+  ring: <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="5.2" fill="none" stroke="currentColor" strokeWidth="2" /></svg>,
+}
 const iconBtn = (on: boolean): React.CSSProperties => ({
-  width: 44, height: 44, display: 'grid', placeItems: 'center', border: 0, borderRadius: 22, color: INK,
-  background: on ? '#25252e' : 'transparent', transition: 'background .3s, opacity .5s',
+  width: 44, height: 44, display: 'grid', placeItems: 'center', border: 0, borderRadius: 22, color: 'var(--ink)',
+  background: on ? 'var(--pressed)' : 'transparent', transition: 'background .3s, opacity .5s',
 })
 const CSS = `
 .sp-root:focus{outline:none}
-.sp-root:focus-visible{outline:2px solid rgba(255,255,255,.5);outline-offset:-4px}
-.sp-btn:focus-visible{outline:2px solid #fff;outline-offset:2px}
+.sp-root:focus-visible{outline:2px solid var(--ink);outline-offset:-4px}
+.sp-btn:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 fieldset.sp-fs{border:0;margin:0;padding:0;min-width:0}
 .sp-vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;padding:0}
 .sp-pills{display:flex;justify-content:center;gap:6px;flex-wrap:wrap}
 .sp-pill{position:relative;display:block;cursor:pointer}
 .sp-pill::after{content:'';position:absolute;inset:-4px} /* 36px pill, 44px touch target */
 .sp-pill input{position:absolute;opacity:0;width:1px;height:1px}
-.sp-pill span{display:flex;align-items:center;gap:7px;height:36px;padding:0 16px;border-radius:999px;font-size:13px;letter-spacing:.3px;text-transform:capitalize;color:#a3a1b4;background:#1b1b22;border:1px solid #2b2b35;transition:background .25s,color .25s,border-color .25s}
-.sp-pill input:checked + span{background:var(--accent,#ece9f5);color:#131318;border-color:transparent}
+.sp-pill span{display:flex;align-items:center;gap:7px;height:36px;padding:0 16px;border-radius:999px;font-size:13px;letter-spacing:.3px;text-transform:capitalize;color:var(--pillt);background:var(--pill);border:1px solid var(--pillb);transition:background .25s,color .25s,border-color .25s}
+.sp-pill input:checked + span{background:var(--accent);color:var(--bg);border-color:transparent}
 .sp-pill.vo span{padding:0 10px;gap:5px}
+.sp-pill.sq span{padding:0;width:36px;justify-content:center}
+.sp-pill.fo span{padding:0 14px;text-transform:none;font-size:14px}
+.sp-pill.sw span{padding:0;width:36px;justify-content:center;background:transparent}
+.sp-pill.sw input:checked + span{background:transparent;border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
 .sp-pill svg{flex:none}
-.sp-pill.tg input:checked + span{background:#1b1b22;color:#ece9f5;border-color:#ece9f5}
-.sp-pill.tg span::before{content:'';width:6px;height:6px;border-radius:50%;background:#4a4a58;transition:background .25s}
-.sp-pill.tg input:checked + span::before{background:#ece9f5}
-.sp-pill input:focus-visible + span{outline:2px solid #fff;outline-offset:2px}
+.sp-sw{width:20px;height:20px;border-radius:50%;display:block}
+.sp-pill.tg input:checked + span{background:var(--pill);color:var(--ink);border-color:var(--ink)}
+.sp-pill.tg span::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--pillt);opacity:.45;transition:background .25s,opacity .25s}
+.sp-pill.tg input:checked + span::before{background:var(--ink);opacity:1}
+.sp-pill input:focus-visible + span{outline:2px solid var(--ink);outline-offset:2px}
+.sp-row{display:flex;align-items:center;justify-content:center;gap:8px}
+.sp-rowl{width:52px;flex:none;font-size:11px;letter-spacing:1.4px;text-transform:uppercase;color:var(--pillt)}
 @media (prefers-reduced-motion: reduce){.sp-pill span,.sp-pill span::before{transition:none}}
 `
 
@@ -81,14 +133,26 @@ export default function Spin() {
   const [cycles, setCycles] = useState(0)
   const [chrome, setChrome] = useState(true)
   const [pokeTick, setPokeTick] = useState(0)
+  const [look] = useState(readLook) // restored from the last visit
+  const [themeId, setThemeId] = useState<ThemeId>(look.theme)
+  const [n, setN] = useState(look.n)
+  const [shape, setShape] = useState<Shape>(look.shape)
+  const [font, setFont] = useState<FontId>(look.font)
+  const [lookOpen, setLookOpen] = useState(false)
+  const theme: Theme = THEMES[themeId]
   const padRef = useRef<{ gain: GainNode; oscs: OscillatorNode[]; lfo: OscillatorNode } | null>(null)
   const noiseRef = useRef<{ gain: GainNode; src: AudioBufferSourceNode } | null>(null)
 
   const s = useRef({
     rot: 0, w: 0.15, dragging: false, lastA: 0, lastT: 0,
-    pulse: new Float32Array(N), lastNote: 0, muted: false, voice: 'bowl' as Voice, cyFrac: 0.44, pid: -1, cycleIdx: 0, W: 0, H: 0,
+    pulse: new Float32Array(MAX_N), th: THEMES.charcoal as Theme, n: 12, step: (Math.PI * 2) / 12, shape: 'circle' as Shape, lastNote: 0, muted: false, voice: 'bowl' as Voice, cyFrac: 0.44, pid: -1, cycleIdx: 0, W: 0, H: 0,
     breathOn: false, breathT0: 0, ended: false, phase: 'in' as 'in' | 'out',
   })
+
+  s.current.th = theme; s.current.n = n; s.current.step = (Math.PI * 2) / n; s.current.shape = shape // the canvas reads the look from here
+  useEffect(() => {
+    try { localStorage.setItem(LOOK_KEY, JSON.stringify({ theme: themeId, n, shape, font })) } catch { /* private mode */ }
+  }, [themeId, n, shape, font])
 
   const ensureAudio = () => {
     if (audio.current) {
@@ -236,7 +300,7 @@ export default function Spin() {
       if (canvas.width !== W * dpr || canvas.height !== H * dpr) {
         canvas.width = W * dpr; canvas.height = H * dpr; st.W = W; st.H = H
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-        ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H)
+        ctx.fillStyle = st.th.bg; ctx.fillRect(0, 0, W, H)
       }
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
@@ -247,7 +311,7 @@ export default function Spin() {
         if (Math.abs(st.w) < (st.ended ? 0.03 : 0.14)) st.w = (st.ended ? 0.03 : 0.14) * (st.w < 0 ? -1 : 1) // never fully stops
         st.rot += st.w * dt
       }
-      const a0 = Math.floor(prevRot / STEP), a1 = Math.floor(st.rot / STEP)
+      const N = st.n, a0 = Math.floor(prevRot / st.step), a1 = Math.floor(st.rot / st.step)
       if (a1 !== a0) {
         const crossed = Math.min(Math.abs(a1 - a0), N)
         const dir = a1 > a0 ? 1 : -1
@@ -257,7 +321,8 @@ export default function Spin() {
       st.pulse.forEach((_, i) => { st.pulse[i] = Math.max(0, st.pulse[i] - dt * 1.6) })
 
       // ---- draw: flat and matte, solid fills only (no glow, blur, gradients or trails)
-      ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H)
+      const th = st.th
+      ctx.fillStyle = th.bg; ctx.fillRect(0, 0, W, H)
       const cx = W / 2, cy = H * st.cyFrac
       const base = Math.min(W, H) * 0.25
       let b = 0.5 + 0.5 * Math.sin(time * 0.9) // idle breathing
@@ -286,34 +351,50 @@ export default function Spin() {
       const nz = noiseRef.current, an = audio.current
       if (nz && an) nz.gain.gain.setTargetAtTime(0.012 + Math.min(Math.abs(st.w) / 22, 1) * 0.05 + (st.breathOn ? 0.03 * b : 0), an.ctx.currentTime, 0.15)
       const R = base * (1 + breath * (b - 0.5) * 2)
-      const accent = ACCENTS[st.voice]
+      const accent = th.accents[st.voice]
 
       for (let k = 1; k <= 3; k++) { // slow outer dust rings, counter-rotating
         const rk = R * (1 + 0.42 * k), n = 14 + k * 8
         const rot = st.rot * (k % 2 ? -0.35 : 0.2) / k
-        ctx.fillStyle = k === 1 ? '#3d3d4a' : k === 2 ? '#31313c' : '#272731'
+        ctx.fillStyle = th.dust[k - 1]
         for (let i = 0; i < n; i++) {
           const ang = rot + (i / n) * Math.PI * 2
           ctx.beginPath(); ctx.arc(cx + Math.cos(ang) * rk, cy + Math.sin(ang) * rk, 1.7, 0, Math.PI * 2); ctx.fill()
         }
       }
       ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2)
-      ctx.strokeStyle = '#33333f'; ctx.lineWidth = 1.5; ctx.stroke()
+      ctx.strokeStyle = th.ring; ctx.lineWidth = 1.5; ctx.stroke()
 
-      const dirw = st.w >= 0 ? 1 : -1, streak = Math.min(Math.abs(st.w) * 0.045, 0.75)
+      const dirw = st.w >= 0 ? 1 : -1, streak = Math.min(Math.abs(st.w) * 0.045, 0.75), r0 = dotSize(N)
+      // one dot in the chosen shape, centred at (x, y) and pointing outward along `ang`
+      const drawDot = (x: number, y: number, ang: number, r: number, color: string, alpha: number) => {
+        const ca = Math.cos(ang), sa = Math.sin(ang)
+        ctx.globalAlpha = alpha; ctx.fillStyle = color; ctx.strokeStyle = color
+        ctx.beginPath()
+        switch (st.shape) {
+          case 'bar': ctx.moveTo(x - ca * r * 1.9, y - sa * r * 1.9); ctx.lineTo(x + ca * r * 1.9, y + sa * r * 1.9)
+            ctx.lineWidth = r * 1.15; ctx.lineCap = 'round'; ctx.stroke(); break
+          case 'petal': ctx.ellipse(x, y, r * 2, r * 0.82, ang, 0, Math.PI * 2); ctx.fill(); break
+          case 'diamond': ctx.moveTo(x + ca * r * 1.5, y + sa * r * 1.5); ctx.lineTo(x - sa * r * 0.95, y + ca * r * 0.95)
+            ctx.lineTo(x - ca * r * 1.5, y - sa * r * 1.5); ctx.lineTo(x + sa * r * 0.95, y - ca * r * 0.95); ctx.closePath(); ctx.fill(); break
+          case 'ring': ctx.arc(x, y, r * 0.95, 0, Math.PI * 2); ctx.lineWidth = Math.max(1.6, r * 0.34); ctx.stroke(); break
+          default: ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill()
+        }
+        ctx.globalAlpha = 1
+      }
       for (let i = 0; i < N; i++) {
-        const ang = st.rot + i * STEP, p = st.pulse[i], r = 6 + p * 4
+        const ang = st.rot + i * st.step, p = st.pulse[i], r = r0 * (1 + p * 0.65)
         if (streak > 0.05) { // speed shows as a flat, translucent streak along the ring
           const tail = ang - dirw * streak
           ctx.beginPath(); ctx.arc(cx, cy, R, Math.min(ang, tail), Math.max(ang, tail))
           ctx.strokeStyle = accent; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.globalAlpha = 0.45; ctx.stroke(); ctx.globalAlpha = 1
         }
         const x = cx + Math.cos(ang) * R, y = cy + Math.sin(ang) * R
-        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = accent; ctx.fill()
-        if (p > 0.02) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = INK; ctx.globalAlpha = p; ctx.fill(); ctx.globalAlpha = 1 }
+        drawDot(x, y, ang, r, accent, 1)
+        if (p > 0.02) drawDot(x, y, ang, r, th.ink, p) // a passing detent lights the dot up
       }
       ctx.beginPath(); ctx.arc(cx, cy, 2.5, 0, Math.PI * 2)
-      ctx.fillStyle = '#5a5a69'; ctx.fill()
+      ctx.fillStyle = th.hub; ctx.fill()
 
       raf = requestAnimationFrame(frame)
     }
@@ -344,7 +425,7 @@ export default function Spin() {
     st.rot += d
     st.w = st.w * 0.6 + (d / dt) * 0.4 // smoothed finger velocity becomes the flick
     st.w = Math.max(-26, Math.min(26, st.w))
-    const a0 = Math.floor(prev / STEP), a1 = Math.floor(st.rot / STEP)
+    const N = st.n, a0 = Math.floor(prev / st.step), a1 = Math.floor(st.rot / st.step)
     if (a1 !== a0) {
       const dir = a1 > a0 ? 1 : -1
       for (let k = 1; k <= Math.min(Math.abs(a1 - a0), N); k++) st.pulse[(((a0 + dir * k) % N) + N) % N] = 1
@@ -369,7 +450,7 @@ export default function Spin() {
 
   const poke = () => setPokeTick((n) => n + 1)
   const stop = (e: React.PointerEvent) => { e.stopPropagation(); poke() }
-  const hintBottom = 190
+  const hintBottom = lookOpen ? 290 : 190
 
   // keyboard access to the spinner itself: arrows spin it
   const onKey = (e: React.KeyboardEvent) => {
@@ -384,26 +465,28 @@ export default function Spin() {
     <div ref={wrap} className="sp-root" tabIndex={0} role="application"
       aria-label="Spinner. Arrow keys spin it."
       onKeyDown={onKey} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
-      style={{ position: 'fixed', inset: 0, background: BG, overflow: 'hidden', touchAction: 'none', userSelect: 'none',
-        fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif' }}>
+      style={{ position: 'fixed', inset: 0, background: 'var(--bg)', overflow: 'hidden', touchAction: 'none', userSelect: 'none',
+        fontFamily: FONTS[font].stack, transition: 'background .35s',
+        ['--bg' as string]: theme.bg, ['--ink' as string]: theme.ink, ['--pill' as string]: theme.pill, ['--pillb' as string]: theme.pillBorder,
+        ['--pillt' as string]: theme.pillText, ['--pressed' as string]: theme.pressed, ['--accent' as string]: theme.accents[voice] } as React.CSSProperties}>
       <style>{CSS}</style>
       <canvas ref={cvs} aria-hidden="true" style={{ width: '100%', height: '100%', display: 'block' }} />
 
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: `calc(var(--safe-bottom) + ${hintBottom}px)`, textAlign: 'center',
-        color: INK, pointerEvents: 'none', opacity: touched ? 0 : 1, transition: 'opacity 1.2s ease-out, bottom .5s' }}>
-        <div style={{ fontSize: 22, fontWeight: 200, letterSpacing: 1 }}>Flick to spin</div>
+        color: 'var(--ink)', pointerEvents: 'none', opacity: touched ? 0 : 1, transition: 'opacity 1.2s ease-out, bottom .5s' }}>
+        <div style={{ fontSize: 22, fontWeight: FONTS[font].weight, letterSpacing: 1 }}>Flick to spin</div>
       </div>
       <div role="status" aria-live="polite" style={{ position: 'absolute', left: 0, right: 0, bottom: `calc(var(--safe-bottom) + ${hintBottom}px)`,
-        textAlign: 'center', color: INK, fontSize: 22, fontWeight: 200, letterSpacing: 1, pointerEvents: 'none',
+        textAlign: 'center', color: 'var(--ink)', fontSize: 22, fontWeight: FONTS[font].weight, letterSpacing: 1, pointerEvents: 'none',
         opacity: breathOn && !ended ? 0.85 : 0, transition: 'opacity 0.8s ease-out, bottom .5s' }}>
         {breathOn && !ended ? `Breathe ${phase}` : ''}
       </div>
       <div aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, top: 'calc(var(--safe-top) + 22px)', textAlign: 'center',
-        color: INK, fontSize: 12, letterSpacing: 2.5, textTransform: 'uppercase', pointerEvents: 'none',
+        color: 'var(--ink)', fontSize: 12, letterSpacing: 2.5, textTransform: 'uppercase', pointerEvents: 'none',
         opacity: breathOn && !ended ? 0.55 : 0, transition: 'opacity .8s ease-out' }}>{cycles} {cycles === 1 ? 'breath' : 'breaths'}</div>
-      <div aria-hidden={!ended} style={{ position: 'absolute', inset: 0, background: BG, pointerEvents: 'none',
+      <div aria-hidden={!ended} style={{ position: 'absolute', inset: 0, background: 'var(--bg)', pointerEvents: 'none',
         opacity: ended ? 0.94 : 0, transition: `opacity ${FADE_S}s ease-in-out`, display: 'grid', placeItems: 'center' }}>
-        <div style={{ color: INK, fontSize: 22, fontWeight: 200, letterSpacing: 1, opacity: ended ? 0.7 : 0,
+        <div style={{ color: 'var(--ink)', fontSize: 22, fontWeight: FONTS[font].weight, letterSpacing: 1, opacity: ended ? 0.7 : 0,
           transition: `opacity ${FADE_S}s ease-in-out`, textAlign: 'center' }}>
           Rest<div style={{ fontSize: 13, opacity: 0.55, marginTop: 8, fontWeight: 400 }}>Tap to continue</div>
         </div>
@@ -416,18 +499,24 @@ export default function Spin() {
           onClick={() => { ensureAudio(); setTouched(true); poke(); setBreath(!s.current.breathOn) }}>
           <BreatheIcon />
         </button>
-        <button type="button" className="sp-btn" aria-label="Mute" aria-pressed={muted} style={iconBtn(false)}
-          onClick={() => { poke(); toggleMute() }}>
-          <SoundIcon off={muted} />
-        </button>
+        <div style={{ display: 'flex' }}>
+          <button type="button" className="sp-btn" aria-label="Look" aria-pressed={lookOpen} aria-controls="spin-look" style={iconBtn(lookOpen)}
+            onClick={() => { poke(); setLookOpen((o) => !o) }}>
+            <LookIcon />
+          </button>
+          <button type="button" className="sp-btn" aria-label="Mute" aria-pressed={muted} style={iconBtn(false)}
+            onClick={() => { poke(); toggleMute() }}>
+            <SoundIcon off={muted} />
+          </button>
+        </div>
       </div>
 
       {/* sound controls: minimal pills under the spinner, never a modal, so you can change them mid-spin */}
-      <div role="group" aria-label="Sound" onPointerDown={stop}
+      {!lookOpen && <div role="group" aria-label="Sound" onPointerDown={stop}
         onPointerMove={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()} onPointerCancel={(e) => e.stopPropagation()}
         style={{ position: 'absolute', left: 8, right: 8, bottom: 'calc(var(--safe-bottom) + 16px)', maxWidth: 420, margin: '0 auto',
-          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, color: INK,
-          opacity: chrome ? 1 : 0.5, transition: 'opacity .6s ease-out', ['--accent' as string]: ACCENTS[voice] } as React.CSSProperties}>
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, color: 'var(--ink)',
+          opacity: chrome ? 1 : 0.5, transition: 'opacity .6s ease-out' }}>
         {/* choose one: radio pills */}
         <fieldset className="sp-fs">
           <legend className="sp-vh">Instrument</legend>
@@ -449,7 +538,59 @@ export default function Spin() {
             <TogglePill label="Air" checked={noiseOn} onChange={(v) => { ensureAudio(); setTouched(true); setNoiseOn(v); setNoise(v) }} />
           </div>
         </fieldset>
-      </div>
+      </div>}
+
+      {/* look controls: palette, dot count, dot shape, font. They replace the sound pills while open, so the spinner stays clear */}
+      {lookOpen && <div id="spin-look" role="group" aria-label="Look" onPointerDown={stop}
+        onPointerMove={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()} onPointerCancel={(e) => e.stopPropagation()}
+        style={{ position: 'absolute', left: 8, right: 8, bottom: 'calc(var(--safe-bottom) + 16px)', maxWidth: 420, margin: '0 auto',
+          display: 'flex', flexDirection: 'column', gap: 10, color: 'var(--ink)', opacity: chrome ? 1 : 0.6, transition: 'opacity .6s ease-out' }}>
+        <fieldset className="sp-fs"><legend className="sp-vh">Palette</legend>
+          <div className="sp-row"><span className="sp-rowl" aria-hidden="true">Palette</span>
+            <div className="sp-pills">
+              {THEME_IDS.map((id) => (
+                <label key={id} className="sp-pill sw">
+                  <input type="radio" name="theme" value={id} checked={themeId === id} onChange={() => setThemeId(id)} />
+                  <span><i className="sp-sw" style={{ background: `linear-gradient(90deg, ${THEMES[id].bg} 50%, ${THEMES[id].accents.bowl} 50%)`,
+                    boxShadow: `inset 0 0 0 1px ${THEMES[id].pillBorder}` }} /><b className="sp-vh">{THEMES[id].name}</b></span>
+                </label>
+              ))}
+            </div></div>
+        </fieldset>
+        <fieldset className="sp-fs"><legend className="sp-vh">Dots</legend>
+          <div className="sp-row"><span className="sp-rowl" aria-hidden="true">Dots</span>
+            <div className="sp-pills">
+              {COUNTS.map((c) => (
+                <label key={c} className="sp-pill sq">
+                  <input type="radio" name="count" value={c} checked={n === c} onChange={() => setN(c)} />
+                  <span>{c}</span>
+                </label>
+              ))}
+            </div></div>
+        </fieldset>
+        <fieldset className="sp-fs"><legend className="sp-vh">Shape</legend>
+          <div className="sp-row"><span className="sp-rowl" aria-hidden="true">Shape</span>
+            <div className="sp-pills">
+              {SHAPES.map((sh) => (
+                <label key={sh} className="sp-pill sq">
+                  <input type="radio" name="shape" value={sh} checked={shape === sh} onChange={() => setShape(sh)} />
+                  <span>{SHAPE_GLYPHS[sh]}<b className="sp-vh">{sh}</b></span>
+                </label>
+              ))}
+            </div></div>
+        </fieldset>
+        <fieldset className="sp-fs"><legend className="sp-vh">Font</legend>
+          <div className="sp-row"><span className="sp-rowl" aria-hidden="true">Font</span>
+            <div className="sp-pills">
+              {(Object.keys(FONTS) as FontId[]).map((f) => (
+                <label key={f} className="sp-pill fo">
+                  <input type="radio" name="font" value={f} checked={font === f} onChange={() => setFont(f)} />
+                  <span style={{ fontFamily: FONTS[f].stack }}>{FONTS[f].name}</span>
+                </label>
+              ))}
+            </div></div>
+        </fieldset>
+      </div>}
     </div>
   )
 }
