@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { AnimatePresence, motion, useMotionValue, useTransform } from 'framer-motion'
 
 type Status = 'overdue' | 'due' | 'paid'
@@ -18,6 +18,7 @@ function Row({ inv, onOpen, onRemind }: { inv: Invoice; onOpen: () => void; onRe
   const x = useMotionValue(0)
   const bg = useTransform(x, [-120, 0], ['#3b5bff', 'rgba(59,91,255,0)'])
   const canRemind = inv.status !== 'paid'
+  const dragged = useRef(false)
   return (
     <motion.div style={{ background: bg, borderRadius: 16, marginBottom: 8, position: 'relative' }}>
       <span style={{ position: 'absolute', right: 20, top: '50%', transform: 'translateY(-50%)', color: '#fff', fontWeight: 600 }}>
@@ -29,8 +30,12 @@ function Row({ inv, onOpen, onRemind }: { inv: Invoice; onOpen: () => void; onRe
         drag={canRemind ? 'x' : false}
         dragConstraints={{ left: 0, right: 0 }}
         dragElastic={{ left: 0.5, right: 0 }}
-        onDragEnd={(_, i) => { if (i.offset.x < -100) onRemind() }}
-        onTap={onOpen}
+        onDragStart={() => { dragged.current = true }}
+        onDragEnd={(_, i) => {
+          if (i.offset.x < -100) onRemind()
+          setTimeout(() => { dragged.current = false }, 50)
+        }}
+        onTap={() => { if (!dragged.current) onOpen() }}
       >
         <div>
           <div style={{ fontWeight: 600 }}>{inv.client}</div>
