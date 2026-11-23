@@ -27,3 +27,10 @@ Vite prints a **Network** URL (e.g. `http://192.168.x.x:5173`). Open it on your 
 ## Deploy
 
 `npm run build` outputs `dist/` with relative paths, so it works on GitHub Pages or any static host.
+
+## Claude Code skills
+
+Project skills live in `.claude/skills/`:
+
+- `new-prototype`: scaffold and register a prototype following the repo's mobile rules
+- `simulator-check`: verify a prototype in the iOS Simulator, including gestures
