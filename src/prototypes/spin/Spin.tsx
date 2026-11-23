@@ -469,8 +469,8 @@ export default function Spin() {
       const sMax = (W / 2 - 4) * (R / base), sMin = W * 0.05
       const spiralR = (u: number) => sMin + (sMax - sMin) * u
       const ripple = st.voice === 'ripple'
-      if (!spiral) { if (!ripple) ctx.stroke() }
-      else { // a flat line that fades in at the middle and out at the outer end
+      // no guide line behind the ring shapes any more: the shapes alone make the circle (Drops keeps its spiral, Ripple its rippled line)
+      if (spiral) { // a flat line that fades in at the middle and out at the outer end
         const SEG = 220
         ctx.lineCap = 'round'
         for (let i = 1; i <= SEG; i++) {
