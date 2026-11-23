@@ -23,7 +23,7 @@ const IN_S = 4, OUT_S = 6 // breath: 4 in, 6 out
 const SESSION_S = Number(new URLSearchParams(location.search).get('s')) || 180
 const FADE_S = 8
 const iconProps = { width: 22, height: 22, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round' } as const
-const BreatheIcon = () => <svg {...iconProps}><circle cx="12" cy="12" r="3" /><circle cx="12" cy="12" r="8" opacity=".55" /></svg>
+const BreatheIcon = () => <svg {...iconProps}><path d="M3 8h9.5a2.5 2.5 0 1 0-2.5-2.5" /><path d="M3 12.5h14a2.5 2.5 0 1 1-2.5 2.5" /><path d="M3 17h6.5a2 2 0 1 1-2 2" opacity=".6" /></svg>
 const SoundIcon = ({ off }: { off: boolean }) => (
   <svg {...iconProps}>
     <path d="M4 10v4h3l5 4V6L7 10H4z" />
