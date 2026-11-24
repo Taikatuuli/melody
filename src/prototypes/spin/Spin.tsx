@@ -50,11 +50,7 @@ const readLook = (): ThemeId => {
     return j.theme in THEMES ? j.theme : 'mono'
   } catch { return 'mono' }
 }
-const IN_S = 4, OUT_S = 6 // breath: 4 in, 6 out
-const SESSION_S = Number(new URLSearchParams(location.search).get('s')) || 180
-const FADE_S = 8
 const iconProps = { width: 22, height: 22, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round' } as const
-const BreatheIcon = () => <svg {...iconProps}><path d="M3 8h9.5a2.5 2.5 0 1 0-2.5-2.5" /><path d="M3 12.5h14a2.5 2.5 0 1 1-2.5 2.5" /><path d="M3 17h6.5a2 2 0 1 1-2 2" opacity=".6" /></svg>
 const SoundIcon = ({ off }: { off: boolean }) => (
   <svg {...iconProps}>
     <path d="M4 10v4h3l5 4V6L7 10H4z" />
@@ -135,7 +131,6 @@ const noiseBuffer = (ctx: AudioContext, smooth: number, level: number, seconds: 
   for (let i = 0; i < d.length; i++) { y += smooth * ((Math.random() * 2 - 1) - y); d[i] = y * level }
   return buf
 }
-const ease = (x: number) => 0.5 - 0.5 * Math.cos(Math.PI * x) // smooth 0..1
 
 export default function Spin() {
   const wrap = useRef<HTMLDivElement>(null)
@@ -143,16 +138,12 @@ export default function Spin() {
   const audio = useRef<AudioBits | null>(null)
   const [muted, setMuted] = useState(false)
   const [touched, setTouched] = useState(false)
-  const [breathOn, setBreathOn] = useState(false)
-  const [phase, setPhase] = useState<'in' | 'out'>('in')
-  const [ended, setEnded] = useState(false)
   const [voice, setVoiceState] = useState<Voice>('bowl')
   const [padOn, setPadOn] = useState(false)
   const [noiseOn, setNoiseOn] = useState(false)
   const [oceanOn, setOceanOn] = useState(false)
   const [subOn, setSubOn] = useState(false)
   const [vinylOn, setVinylOn] = useState(false)
-  const [cycles, setCycles] = useState(0)
   const [chrome, setChrome] = useState(true)
   const [pokeTick, setPokeTick] = useState(0)
   const [themeId, setThemeId] = useState<ThemeId>(readLook) // restored from the last visit
@@ -173,8 +164,7 @@ export default function Spin() {
 
   const s = useRef({
     rot: 0, w: 0.15, dragging: false, lastA: 0, lastT: 0,
-    pulse: new Float32Array(DOTS * SPIRAL_TURNS), th: THEMES.mono as Theme, n: DOTS, step: (Math.PI * 2) / DOTS, lastNote: 0, muted: false, voice: 'bowl' as Voice, cyFrac: 0.44, pid: -1, cycleIdx: 0, W: 0, H: 0,
-    breathOn: false, breathT0: 0, ended: false, phase: 'in' as 'in' | 'out',
+    pulse: new Float32Array(DOTS * SPIRAL_TURNS), th: THEMES.mono as Theme, n: DOTS, step: (Math.PI * 2) / DOTS, lastNote: 0, muted: false, voice: 'bowl' as Voice, cyFrac: 0.44, pid: -1, W: 0, H: 0,
   })
 
   s.current.th = theme // the canvas reads the look from here
@@ -317,7 +307,7 @@ export default function Spin() {
     }
   }
 
-  // Ocean: dark noise that swells and ebbs like waves (and brightens on the crest). In breath mode the swell follows your breathing.
+  // Ocean: dark noise that swells and ebbs like waves (and brightens on the crest).
   const setOcean = (on: boolean) => {
     const a = audio.current
     if (!a) return
@@ -394,28 +384,6 @@ export default function Spin() {
     }
   }
 
-  // soft tone that rises on the in-breath and falls on the out-breath, so you can follow with your eyes closed
-  const breathCue = (dir: 1 | -1) => {
-    const a = audio.current
-    if (!a || s.current.muted) return
-    const t = a.ctx.currentTime, o = a.ctx.createOscillator(), g = a.ctx.createGain()
-    o.type = 'sine'
-    o.frequency.setValueAtTime(dir > 0 ? 220 : 330, t)
-    o.frequency.exponentialRampToValueAtTime(dir > 0 ? 330 : 220, t + 0.9)
-    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.045, t + 0.08); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.6)
-    o.connect(g); g.connect(a.master); o.start(t); o.stop(t + 1.7)
-  }
-
-  const setBreath = (on: boolean) => {
-    const st = s.current
-    st.breathOn = on; st.ended = false; st.breathT0 = performance.now()
-    st.phase = 'in'; st.cycleIdx = 0
-    setBreathOn(on); setEnded(false); setPhase('in'); setCycles(0)
-    if (on) { ensureAudio(); breathCue(1) }
-    const a = audio.current
-    if (a) a.master.gain.setTargetAtTime(st.muted ? 0 : 0.9, a.ctx.currentTime, 0.3)
-  }
-
   useEffect(() => { // controls dim (never hide) after a few quiet seconds, so they stay reachable while you play
     setChrome(true)
     const t = window.setTimeout(() => setChrome(false), 4000)
@@ -466,8 +434,8 @@ export default function Spin() {
       // ---- physics
       const prevRot = st.rot
       if (!st.dragging) {
-        st.w *= Math.exp(-(st.ended ? 1.1 : 0.42) * dt) // long, soft decay; faster when the session ends
-        const floor = st.ended || reduceRef.current ? 0.03 : 0.14 // the idle drift: almost still when motion is reduced
+        st.w *= Math.exp(-0.42 * dt) // a long, soft decay
+        const floor = reduceRef.current ? 0.03 : 0.14 // the idle drift: almost still when motion is reduced
         if (Math.abs(st.w) < floor) st.w = floor * (st.w < 0 ? -1 : 1) // never fully stops
         st.rot += st.w * dt
       }
@@ -487,35 +455,12 @@ export default function Spin() {
       ctx.fillStyle = th.bg; ctx.fillRect(0, 0, W, H)
       const cx = W / 2, cy = H * st.cyFrac
       const base = Math.min(W, H) * 0.25
-      let b = 0.5 + 0.5 * Math.sin(time * 0.9) // idle breathing
-      let breath = reduceRef.current ? 0.012 : 0.035
-      if (st.breathOn) {
-        const el = (now - st.breathT0) / 1000
-        const CYC = IN_S + OUT_S // one breath in + one breath out = one full cycle = one full turn of the arc
-        const c = el % CYC
-        const cycleB = c < IN_S ? ease(c / IN_S) : 1 - ease((c - IN_S) / OUT_S)
-        const k = Math.min(1, el / 1.2) // ease out of the idle breathing into the first inhale
-        b = b * (1 - k) + cycleB * k
-        breath = reduceRef.current ? 0.05 : 0.12 // the breath swell stays, but gentler
-        const ph = c < IN_S ? 'in' : 'out'
-        if (ph !== st.phase) { st.phase = ph; setPhase(ph); breathCue(ph === 'in' ? 1 : -1); navigator.vibrate?.(8) }
-        const ci = Math.floor(el / CYC)
-        if (ci !== st.cycleIdx) {
-          st.cycleIdx = ci; setCycles(ci) // a full breath just completed
-        }
-        const a = audio.current
-        if (a && !st.ended && !st.muted) a.master.gain.setTargetAtTime(0.55 + 0.45 * b, a.ctx.currentTime, 0.25) // sound swells with the breath
-        if (!st.ended && el > SESSION_S) {
-          st.ended = true; setEnded(true)
-          if (a) a.master.gain.setTargetAtTime(0, a.ctx.currentTime, FADE_S / 4)
-        }
-      }
+      const b = 0.5 + 0.5 * Math.sin(time * 0.9) // the idle swell
+      const breath = reduceRef.current ? 0.012 : 0.035 // the ring's slow idle swell
       const nz = noiseRef.current, an = audio.current
       // the echo shortens as the spinner slows: a lively tail while it spins, and only a repeat or two once it's nearly stopped
       if (an) an.fb.gain.setTargetAtTime(0.1 + 0.2 * Math.min(Math.abs(st.w) / 8, 1), an.ctx.currentTime, 0.2)
-      const oc = oceanRef.current
-      if (oc?.mod && an) oc.mod.gain.setTargetAtTime(st.breathOn ? 0.45 + 0.55 * b : 1, an.ctx.currentTime, 0.25) // with the breath guide on, the waves rise and fall with your breathing
-      if (nz && an) nz.gain.gain.setTargetAtTime(0.012 + Math.min(Math.abs(st.w) / 22, 1) * 0.05 + (st.breathOn ? 0.03 * b : 0), an.ctx.currentTime, 0.15)
+      if (nz && an) nz.gain.gain.setTargetAtTime(0.012 + Math.min(Math.abs(st.w) / 22, 1) * 0.05, an.ctx.currentTime, 0.15)
       const R = base * (1 + breath * (b - 0.5) * 2)
       const accent = th.accents[st.voice]
 
@@ -528,7 +473,7 @@ export default function Spin() {
           ctx.beginPath(); ctx.arc(cx + Math.cos(ang) * rk, cy + Math.sin(ang) * rk, 1.7, 0, Math.PI * 2); ctx.fill()
         }
       }
-      // the spiral: five rounds from near the middle out to the edges of the screen, scaled with the breath
+      // the spiral: five rounds from near the middle out to the edges of the screen, scaled with the idle swell
       const sMax = (W / 2 - 4) * (R / base), sMin = W * 0.05
       const spiralR = (u: number) => sMin + (sMax - sMin) * u
       const ripple = st.voice === 'ripple'
@@ -627,7 +572,6 @@ export default function Spin() {
     wrap.current!.setPointerCapture(e.pointerId)
     st.pid = e.pointerId
     st.dragging = true; st.lastA = pointerAngle(e); st.lastT = performance.now()
-    if (st.ended && performance.now() - st.breathT0 > (SESSION_S + 3) * 1000) setBreath(true) // tap to begin again
   }
   const move = (e: React.PointerEvent) => {
     const st = s.current
@@ -735,29 +679,9 @@ export default function Spin() {
         color: 'var(--ink)', pointerEvents: 'none', opacity: touched ? 0 : 1, transition: 'opacity .4s ease-out' }}>
         <div style={{ fontSize: 22, fontWeight: 200, letterSpacing: 1 }}>Flick to spin</div>
       </div>
-      <div role="status" aria-live="polite" style={{ position: 'absolute', left: 0, right: 0, bottom: `calc(var(--safe-bottom) + ${hintBottom}px)`,
-        textAlign: 'center', color: 'var(--ink)', fontSize: 22, fontWeight: 200, letterSpacing: 1, pointerEvents: 'none',
-        opacity: breathOn && !ended ? 0.85 : 0, transition: 'opacity .4s ease-out' }}>
-        {breathOn && !ended ? `Breathe ${phase}` : ''}
-      </div>
-      <div aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, top: 'calc(var(--safe-top) + 22px)', textAlign: 'center',
-        color: 'var(--ink)', fontSize: 12, letterSpacing: 2.5, textTransform: 'uppercase', pointerEvents: 'none',
-        opacity: breathOn && !ended ? 0.55 : 0, transition: 'opacity .4s ease-out' }}>{cycles} {cycles === 1 ? 'breath' : 'breaths'}</div>
-      <div aria-hidden={!ended} style={{ position: 'absolute', inset: 0, background: 'var(--bg)', pointerEvents: 'none',
-        opacity: ended ? 0.94 : 0, transition: `opacity ${FADE_S}s ease-in-out`, display: 'grid', placeItems: 'center' }}>
-        <div style={{ color: 'var(--ink)', fontSize: 22, fontWeight: 200, letterSpacing: 1, opacity: ended ? 0.7 : 0,
-          transition: `opacity ${FADE_S}s ease-in-out`, textAlign: 'center' }}>
-          Rest<div style={{ fontSize: 13, opacity: 0.55, marginTop: 8, fontWeight: 400 }}>Tap to continue</div>
-        </div>
-      </div>
-
       {/* quick actions are toggle buttons: constant label, state in aria-pressed */}
       <div onPointerDown={stop} style={{ position: 'absolute', top: 'calc(var(--safe-top) + 8px)', left: 8, right: 8,
-        display: 'flex', justifyContent: 'space-between', opacity: chrome ? 0.8 : 0.3, transition: 'opacity .6s ease-out' }}>
-        <button type="button" className="sp-btn" aria-label="Breathing guide" aria-pressed={breathOn} style={iconBtn(breathOn)}
-          onClick={() => { ensureAudio(); setTouched(true); poke(); setBreath(!s.current.breathOn) }}>
-          <BreatheIcon />
-        </button>
+        display: 'flex', justifyContent: 'flex-end', opacity: chrome ? 0.8 : 0.3, transition: 'opacity .6s ease-out' }}>
         <div style={{ display: 'flex' }}>
           <button type="button" className="sp-btn" aria-label="Controls" aria-pressed={dockOpen} aria-controls={lookOpen ? 'spin-look' : 'spin-sound'} style={iconBtn(dockOpen)}
             onClick={() => { poke(); if (dockOpen) setLookOpen(false); setDockOpen(!dockOpen) }}> {/* hiding also closes the swatches, so the controls always come back as the instruments and layers */}

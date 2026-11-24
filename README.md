@@ -8,8 +8,7 @@ A calm, flick-to-spin fidget toy. Best on a phone, with sound on. No goal, score
 
 - **Spin it:** flick or drag around the center. It has inertia and never quite stops. Every detent plays a soft note.
 - **Five instruments**, each with its own sound and its own shape: Bowl (crescents), Kalimba (thin lines), Marimba (thick bars), Drops (a five-round spiral of dots in lanes that turn in opposite directions) and Ripple (a rippled ring where the ripple that just sounded is the biggest).
-- **Five background layers** you can stack: Pad, Air (follows spin speed), Ocean (follows the breath guide), Sub hum and Vinyl crackle.
-- **Breath guide:** 4 seconds in, 6 out, with a "Breathe in / out" label, a breath counter and a gentle fade to rest after three minutes.
+- **Five background layers** you can stack: Pad, Air (follows spin speed), Ocean (slow waves), Sub hum and Vinyl crackle.
 - **Look:** Mono, Chalk or Blush. Remembered on the device.
 - **Accessible:** real radio and switch controls, keyboard support (arrow keys spin it), reduced-motion handling, and the audio unlocks on the first tap on iOS.
 
