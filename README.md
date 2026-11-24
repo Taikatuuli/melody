@@ -56,3 +56,7 @@ Earlier experiments (Invoices, Stack and Orbit) were removed from the app to kee
 ```bash
 git show archive/early-prototypes:src/prototypes/invoices/Invoices.tsx
 ```
+
+## Next
+
+The list of what's planned is in [TODO.md](TODO.md).
