@@ -48,3 +48,11 @@ Project skills live in `.claude/skills/`:
 
 - `new-prototype`: scaffold and register a prototype following the repo's mobile rules
 - `simulator-check`: verify a prototype in the iOS Simulator, including gestures
+
+## Archive
+
+Earlier experiments (Invoices, Stack and Orbit) were removed from the app to keep the repo focused. They're kept in git under the tag `archive/early-prototypes`:
+
+```bash
+git show archive/early-prototypes:src/prototypes/invoices/Invoices.tsx
+```
