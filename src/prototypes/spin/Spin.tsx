@@ -46,7 +46,7 @@ const readRings = (): Voice[] => { // the instruments that were on last time
     return v.length ? v : ['bowl']
   } catch { return ['bowl'] }
 }
-type SpinState = { rings: Ring[]; th: Theme; fbT: number; muted: boolean; cyFrac: number; W: number; H: number }
+type SpinState = { rings: Ring[]; th: Theme; fbT: number; muted: boolean; cyFrac: number; cx: number; W: number; H: number }
 // the loop: you record how you spin the rings, and then the rings spin themselves that way, over and over
 type LoopFrame = { t: number; rots: Partial<Record<Voice, number>> }
 type LoopMode = 'idle' | 'rec' | 'ready' | 'play' // ready: a sample is kept and stopped; play: it is playing back
@@ -61,15 +61,19 @@ const rotAt = (frames: LoopFrame[], voice: Voice, tt: number): number | null => 
   const span = b.t - a.t
   return span > 1e-6 ? ra + ((rb - ra) * (tt - a.t)) / span : rb
 }
-type LayerName = 'pad' | 'sub' | 'vinyl' | 'loop'
-const LAYERS: LayerName[] = ['pad', 'sub', 'vinyl', 'loop']
-const LAYER_LABELS: Record<LayerName, string> = { pad: 'Pad', sub: 'Sub hum', vinyl: 'Vinyl', loop: 'Loop' }
+type LayerName = 'pad' | 'sub' | 'vinyl'
+const LAYERS: LayerName[] = ['pad', 'sub', 'vinyl']
+const LAYER_LABELS: Record<LayerName, string> = { pad: 'Pad', sub: 'Sub hum', vinyl: 'Vinyl' }
+// on a phone held sideways the controls move to a column on the right and the rings take the rest, instead of being squeezed into a strip between them
+const LAND_PANEL = 276
+const isLandscape = (w: number, h: number) => h > 0 && h < 440 && w > h * 1.25 // measured on the screen itself, so a phone frame on a desktop page is judged by its own size
 const LOOP_MAX = 30 // the longest loop that can be recorded, in seconds
 const REC_RED = '#e5484d' // the record dot and its timer ring
-const DEFAULT_LEVEL = 0.6 // a layer's volume is 0 to 1; at this level it plays at the loudness it was designed for
-const LEVELS_KEY = 'spin-levels'
+const DEFAULT_LEVEL = 0.6 // the volume a layer's sound was designed at: a layer's volume is 0 to 1, and its gain is volume / this
+const START_LEVELS: Record<LayerName, number> = { pad: 0.45, sub: 0.15, vinyl: 0.15 } // where each layer starts: the Pad sits further forward, the Sub hum and Vinyl underneath
+const LEVELS_KEY = 'spin-levels-v2' // bumped so everyone picks up the new starting volumes
 const readLevels = (): Record<LayerName, number> => {
-  const d = { pad: DEFAULT_LEVEL, sub: DEFAULT_LEVEL, vinyl: DEFAULT_LEVEL, loop: DEFAULT_LEVEL }
+  const d = { ...START_LEVELS }
   try {
     const j = JSON.parse(localStorage.getItem(LEVELS_KEY) || '{}')
     for (const n of LAYERS) if (typeof j[n] === 'number' && j[n] >= 0 && j[n] <= 1) d[n] = j[n]
@@ -77,8 +81,6 @@ const readLevels = (): Record<LayerName, number> => {
   return d
 }
 type AudioBits = { ctx: AudioContext; master: GainNode; fb: GainNode; bus: Record<LayerName, GainNode> } // fb = how much of each echo feeds the next; bus = one volume knob per layer
-// readable icon colour on a coloured disc: dark on light colours (yellow), white on the rest
-const onColour = (hex: string) => { const n = parseInt(hex.slice(1), 16), l = 0.2126 * (n >> 16) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255); return l > 150 ? '#141414' : '#ffffff' }
 const VOICES: Voice[] = ['bowl', 'kalimba', 'marimba', 'ripple', 'drops']
 const RING_ORDER: Voice[] = VOICES // biggest ring first: Bowl outside, Drops (the bass) inside
 // several rings at once: where each instrument sits in the scale (steps from its solo pitch) and how fast it runs relative to the others
@@ -87,21 +89,22 @@ const VOICE_GAP: Record<Voice, number> = { bowl: 1.5, marimba: 1.15, kalimba: 0.
 const VOICE_LABELS:Record<Voice, string> = { bowl: 'Bowl', kalimba: 'Kalimba', marimba: 'Marimba', drops: 'Bass', ripple: 'Handpan' }
 // ---- looks you can try: palette, dot count, dot shape, font
 type Theme = {
-  name: string; bg: string; ink: string; ring: string; dust: [string, string, string]; hub: string
+  name: string; bg: string; ink: string; ring: string; dust: [string, string, string]
   pill: string; pillBorder: string; pillText: string; pressed: string; onAccent: string; accents: Record<Voice, string>
 }
 const THEMES = {
-  mono: { name: 'Mono', bg: '#0d0d0d', ink: '#f4f4f4', ring: '#333333', dust: ['#3a3a3a', '#2c2c2c', '#222222'], hub: '#666666',
-    pill: '#171717', pillBorder: '#2a2a2a', pillText: '#9a9a9a', pressed: '#222222', onAccent: '#0d0d0d',
-    accents: { bowl: '#ff6a0d', kalimba: '#9a4dff', marimba: '#e23dff', drops: '#2a62ff', ripple: '#a9b7c4' } }, // one vivid colour per ring
-  chalk: { name: 'Chalk', bg: '#f4f4f2', ink: '#141414', ring: '#cfcfcb', dust: ['#c4c4c0', '#d2d2ce', '#dcdcd8'], hub: '#9a9a96',
-    pill: '#eaeae6', pillBorder: '#d6d6d1', pillText: '#6a6a66', pressed: '#e2e2de', onAccent: '#f4f4f2',
-    accents: { bowl: '#ff5a00', kalimba: '#7a22ff', marimba: '#c612e8', drops: '#1650ff', ripple: '#6f7f8f' } },
+  // Walkman: a cool silver shell by day, a blue-black one by night, with the orange, yellow, blue, teal and red of an 80s portable.
+  // Every accent is at least 3:1 against its own background; the light yellow, orange and teal are a shade deeper than the shell paint so they pass
+  mono: { name: 'Mono', bg: '#0e1216', ink: '#e6ecf0', ring: '#2a323a', dust: ['#39424b', '#2b333b', '#20272e'],
+    pill: '#171d23', pillBorder: '#2a323a', pillText: '#98a3ad', pressed: '#212932', onAccent: '#0e1216',
+    accents: { bowl: '#ff7f3a', kalimba: '#ffd21f', marimba: '#4a8dff', drops: '#ff5043', ripple: '#27c2c4' } },
+  chalk: { name: 'Chalk', bg: '#dfe3e6', ink: '#14181c', ring: '#b4bcc2', dust: ['#aab3ba', '#bec5ca', '#cbd1d5'],
+    pill: '#d3d8dc', pillBorder: '#bcc3c9', pillText: '#4f5861', pressed: '#c7cdd2', onAccent: '#dfe3e6',
+    accents: { bowl: '#d25818', kalimba: '#967800', marimba: '#1f5fbf', drops: '#e0392d', ripple: '#148d8f' } },
 } satisfies Record<string, Theme>
 type ThemeId = keyof typeof THEMES
 // relative size of the five scale degrees' shapes (Kalimba tines and Marimba bars shorten up the scale, Drops dots are biggest on the first)
 const KEYS = [1.15, 0.95, 0.6, 1.05, 0.8] as const
-const THEME_IDS = Object.keys(THEMES) as ThemeId[]
 const SANS = '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif'
 const dotSize = (n: number) => Math.max(3, Math.min(10, 21 / Math.sqrt(n))) // fewer dots are bigger, more dots smaller
 const LOOK_KEY = 'spin-look'
@@ -115,12 +118,20 @@ const readLook = (): ThemeId => {
 const readBw = (): boolean => { try { return JSON.parse(localStorage.getItem(LOOK_KEY) || '{}').bw === true } catch { return false } }
 // black and white mode: every ring is plain ink, no greys. The shapes (and the Colour/B&W swatch) tell them apart
 const BW_ACCENTS: Record<ThemeId, Record<Voice, string>> = {
-  mono: { bowl: '#f4f4f4', kalimba: '#f4f4f4', marimba: '#f4f4f4', drops: '#f4f4f4', ripple: '#f4f4f4' },
-  chalk: { bowl: '#141414', kalimba: '#141414', marimba: '#141414', drops: '#141414', ripple: '#141414' },
+  mono: { bowl: '#e6ecf0', kalimba: '#e6ecf0', marimba: '#e6ecf0', drops: '#e6ecf0', ripple: '#e6ecf0' },
+  chalk: { bowl: '#14181c', kalimba: '#14181c', marimba: '#14181c', drops: '#14181c', ripple: '#14181c' },
 }
 // the Ripple outline is sampled at this many points per frame: kept outside the frame loop so nothing is allocated while it runs
 const RIPPLE_SEG = 360
 const RX = new Float32Array(RIPPLE_SEG + 1), RY = new Float32Array(RIPPLE_SEG + 1), RG = new Float32Array(RIPPLE_SEG + 1)
+// a tapered hairline: pointed at both ends and thickest in the middle, `half` long each way and `w` across, lying along (dx, dy). Defined once, not once per dot per frame
+const lens = (ctx: CanvasRenderingContext2D, x: number, y: number, dx: number, dy: number, half: number, w: number) => {
+  const nx = -dy * w, ny = dx * w
+  ctx.moveTo(x - dx * half, y - dy * half)
+  ctx.quadraticCurveTo(x + nx, y + ny, x + dx * half, y + dy * half)
+  ctx.quadraticCurveTo(x - nx, y - ny, x - dx * half, y - dy * half)
+  ctx.closePath(); ctx.fill()
+}
 const iconProps = { width: 22, height: 22, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round' } as const
 const SoundIcon = ({ off }: { off: boolean }) => (
   <svg {...iconProps}>
@@ -157,7 +168,6 @@ const LAYER_ICONS: Record<LayerName, React.ReactElement> = {
   pad: <svg {...iconProps}><path d="M3 17c3-1 4-11 9-11s6 10 9 11" /><path d="M3 20.5h18" /></svg>, // a swell: the chord rises and fades, over a baseline
   sub: <svg {...iconProps}><path d="M2.5 12c3.2-9 6.4-9 9.5 0s6.3 9 9.5 0" /></svg>, // a long, slow wave: a low frequency
   vinyl: <svg {...iconProps}><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="2.4" /></svg>,
-  loop: <svg {...iconProps}><path d="M4 11V9.500a3 3 0 0 1 3-3h13" /><path d="M17 3.500l3 3-3 3" /><path d="M20 13v1.500a3 3 0 0 1-3 3H4" /><path d="M7 14.500l-3 3 3 3" /></svg>, // repeat: two arrows chasing each other
 }
 const THEME_ICONS: Record<ThemeId, React.ReactElement> = { // Mono is the dark theme, Chalk the light one
   mono: <svg {...vIcon} width={20} height={20}><path d="M20 14.2A8 8 0 0 1 9.8 4a8 8 0 1 0 10.2 10.2z" /></svg>,
@@ -168,7 +178,7 @@ const iconBtn = (on: boolean): React.CSSProperties => ({
   background: on ? 'var(--pressed)' : 'transparent', transition: 'background .15s ease-out, scale .15s ease-out, opacity .5s',
 })
 const CSS = `
-.sp-spin{position:absolute;inset:0}
+.sp-spin{position:absolute;inset:0;touch-action:none}
 .sp-spin:focus{outline:none}
 .sp-spin:focus-visible{outline:2px solid var(--ink);outline-offset:-4px}
 .sp-btn:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
@@ -183,15 +193,15 @@ fieldset.sp-fs{border:0;margin:0;padding:0;min-width:0}
 .sp-pill.sw span{padding:0;width:36px;justify-content:center;background:transparent}
 .sp-pill.sw input:checked + span{background:transparent;border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
 .sp-pill svg{flex:none}
-.sp-tog{position:relative;display:flex;align-items:center;width:76px;height:36px;padding:0 8px;gap:16px;border-radius:999px;border:1px solid var(--pillb);background:var(--pill);cursor:pointer}
+.sp-tog{color:var(--ink);position:relative;display:flex;align-items:center;width:76px;height:36px;padding:0 8px;gap:16px;border-radius:999px;border:1px solid var(--pillb);background:var(--pill);cursor:pointer}
 .sp-tog::after{content:'';position:absolute;inset:-4px}
 .sp-tog .sp-sw{position:relative;z-index:1}
-.sp-knob{position:absolute;left:2px;top:2px;width:36px;height:30px;border-radius:999px;border:1px solid var(--ink);box-shadow:0 0 0 1px var(--ink);transition:transform .2s cubic-bezier(.32,.72,0,1)}
+.sp-knob{position:absolute;left:3px;top:2px;width:30px;height:30px;border-radius:50%;border:1px solid var(--ink);box-shadow:0 0 0 1px var(--ink);transition:transform .2s cubic-bezier(.32,.72,0,1)}
 .sp-tog:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 .sp-tog:active{scale:.96}
 .sp-sw{width:20px;height:20px;border-radius:50%;display:block}
 .sp-pill input:focus-visible + span{outline:2px solid var(--ink);outline-offset:2px}
-.sp-cap{height:14px;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--pillt);white-space:nowrap}
+.sp-cap{height:14px;font-size:.6875rem;letter-spacing:2px;text-transform:uppercase;color:var(--pillt);white-space:nowrap}
 .sp-insrow{position:relative;display:flex;gap:8px}
 .sp-ins{position:relative;display:block;width:44px;height:44px;cursor:pointer}
 .sp-ins input{position:absolute;opacity:0;width:1px;height:1px}
@@ -212,7 +222,6 @@ fieldset.sp-fs{border:0;margin:0;padding:0;min-width:0}
 @keyframes sp-rec{50%{opacity:.35}}
 .sp-lay:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 .sp-row{display:flex;align-items:center;justify-content:center;gap:8px}
-.sp-rowl{width:52px;flex:none;font-size:11px;letter-spacing:1.4px;text-transform:uppercase;color:var(--pillt)}
 .sp-pill:active span,.sp-btn:active{scale:.96}
 .sp-root[data-switching] *,.sp-root[data-switching] *::before{transition:none !important}
 /* reduced motion: nothing slides or scales, but colour and opacity still cross-fade, so every change of state stays visible */
@@ -234,7 +243,7 @@ const noiseBuffer = (ctx: AudioContext, smooth: number, level: number, seconds: 
 }
 
 export default function Spin() {
-  const wrap = useRef<HTMLDivElement>(null)
+  const wrap = useRef<HTMLElement>(null)
   const cvs = useRef<HTMLCanvasElement>(null)
   const audio = useRef<AudioBits | null>(null)
   const knockBuf = useRef<AudioBuffer | null>(null) // a tenth of a second of white noise for the mallet knock, made on first use
@@ -254,8 +263,14 @@ export default function Spin() {
   const wasReviewing = useRef(false)
   const [muted, setMuted] = useState(false)
   const lastPick = useRef<Ring | null>(null) // the ring you last grabbed: it keeps the grab when the gaps are tight
-  const [recSecs, setRecSecs] = useState(0) // how long the current recording has run
-  const [playProg, setPlayProg] = useState(0) // how far through the sample the playback is, 0 to 1
+  const ringTL = useRef<SVGCircleElement>(null) // the timer ring on the record button and the one on the play/pause button are drawn straight onto the SVG, so a ticking clock never re-renders the whole screen
+  const ringMenu = useRef<SVGCircleElement>(null)
+  const progRef = useRef(0) // how far through the recording (or the sample) we are, 0 to 1
+  const setProg = (v: number) => {
+    progRef.current = v
+    const d = `${125.66 * v} 125.66`
+    ringTL.current?.setAttribute('stroke-dasharray', d); ringMenu.current?.setAttribute('stroke-dasharray', d)
+  }
   const [chrome, setChrome] = useState(true)
   const [pokeTick, setPokeTick] = useState(0)
   const [themeId, setThemeId] = useState<ThemeId>(readLook) // restored from the last visit
@@ -269,6 +284,7 @@ export default function Spin() {
   const [layersOpen, setLayersOpen] = useState(true) // show or hide the background sound buttons (they keep playing); the instruments stay
   const [dockOpen, setDockOpen] = useState(true) // show or hide the instrument, layer and look controls
   const theme: Theme = bw ? { ...THEMES[themeId], accents: BW_ACCENTS[themeId] } : THEMES[themeId]
+  const iconOn = themeId === 'chalk' && !bw ? '#ffffff' : theme.bg // one icon colour for every coloured button in a theme, so they match: white on the light theme's deeper colours, the dark shell on the dark theme's bright ones (all at least 4:1)
   const reduceRef = useRef(false) // prefers-reduced-motion
   const padRef = useRef<{ gain: GainNode; oscs: OscillatorNode[]; lfo: OscillatorNode; timer: number } | null>(null)
   const subRef = useRef<Layer | null>(null)
@@ -276,10 +292,20 @@ export default function Spin() {
   const loopRef = useRef<LoopState>({ repeat: true, pausedAt: 0, mode: 'idle', t0: 0, frames: [], dur: 0, lastTT: 0, fresh: false })
 
   const shapeScale = useRef(1) // how much the ring shapes shrink when the rings sit closer together
+  const [land, setLand] = useState(false)
+  useEffect(() => {
+    const box = wrap.current!
+    const on = () => setLand(isLandscape(box.clientWidth, box.clientHeight))
+    on()
+    const ro = new ResizeObserver(on); ro.observe(box)
+    return () => ro.disconnect()
+  }, [])
+  const landRef = useRef(false)
+  landRef.current = land
   const reserveRef = useRef(144) // how much of the bottom the controls cover, so the rings stay clear of them
   reserveRef.current = reviewing ? 134 : dockOpen ? ( (lookOpen ? 216 : 188) - (layersOpen ? 0 : 54)) : 80 // the controls plus the 'Flick to spin' line above them
   const sRef = useRef<SpinState | null>(null)
-  if (!sRef.current) sRef.current = { rings: [...active].sort((x, y) => RING_ORDER.indexOf(x) - RING_ORDER.indexOf(y)).map((v) => ({ ...newRing(v, 0.15), alpha: 1 })), th: THEMES.mono as Theme, fbT: -1, muted: false, cyFrac: 0.44, W: 0, H: 0 }
+  if (!sRef.current) sRef.current = { rings: [...active].sort((x, y) => RING_ORDER.indexOf(x) - RING_ORDER.indexOf(y)).map((v) => ({ ...newRing(v, 0.15), alpha: 1 })), th: THEMES.mono as Theme, fbT: -1, muted: false, cyFrac: 0.44, cx: 0, W: 0, H: 0 }
   const s = sRef as { current: SpinState }
 
   s.current.th = theme // the canvas reads the look from here
@@ -416,7 +442,7 @@ export default function Spin() {
 
   // where the dot (Drops) or crest (Ripple) that is sounding is on screen: the sound pans to its x and, for a faint dot, plays quieter
   const soundSource = (tick: number, ring: Ring) => {
-    const st = s.current, N = ring.n, i = ((tick % N) + N) % N, half = st.W / 2 || 1
+    const st = s.current, N = ring.n, i = ((tick % N) + N) % N, half = st.cx || 1
     if (ring.voice === 'ripple') return { pan: clampPan((Math.cos(ring.rot + i * ring.step) * ring.R) / (half * 0.5)), vis: 1 }
     if (ring.voice === 'drops') return { pan: clampPan((Math.cos(ring.rot + i * ring.step) * ring.R) / (half * 0.5)), vis: 1 } // the Bass is a ring of beads
     return { pan: 0, vis: 1 }
@@ -571,18 +597,20 @@ export default function Spin() {
 
       const th = st.th
       // the spinner lives between the top buttons and whatever the dock takes up right now, so it centres in that space and shrinks to fit it
-      const top = 60, bottom = H - reserveRef.current
-      const cyTarget = Math.max(top + 40, (top + bottom) / 2) / H
+      const lnd = landRef.current // sideways: the controls are a column on the right, so the rings centre in the space left of it
+      const top = lnd ? 16 : 60, bottom = lnd ? H - 16 : H - reserveRef.current
+      const cyTarget = lnd ? 0.5 : Math.max(top + 40, (top + bottom) / 2) / H
       st.cyFrac += (cyTarget - st.cyFrac) * Math.min(1, dt * 9)
-      const cx = W / 2, cy = H * st.cyFrac
-      const room = Math.max((bottom - top) / 2 - 16, 40) // the biggest ring that clears both
+      const cx = lnd ? (W - LAND_PANEL) / 2 : W / 2, cy = H * st.cyFrac
+      st.cx = cx
+      const room = Math.max(Math.min((bottom - top) / 2 - 16, lnd ? cx - 16 : Infinity), 40) // the biggest ring that clears both
       const base = Math.min(Math.min(W, H) * 0.25, room)
       st.rings = st.rings.filter((r) => !(r.leaving && r.alpha < 0.01)) // a ring that has finished fading out is gone
       const rings = st.rings
       const shown = rings.filter((r) => !r.leaving)
       const K = shown.length
       // ---- layout: one instrument is the classic ring; several nest from the biggest (first in the dock) to the smallest
-      const rTop = K > 1 ? Math.max(Math.min(base * 1.75, W / 2 - 24, room), 40) : base
+      const rTop = K > 1 ? Math.max(Math.min(base * 1.75, cx - 24, room), 40) : base
       const rMin = K > 1 ? Math.max(Math.min(52, rTop * 0.55), rTop - (K - 1) * 30) : 0 // neighbouring rings sit no more than 30px apart: with two or three instruments the inner ring moves out toward the outer one
       const lp = loopRef.current
       let tt = 0, resync = false
@@ -677,17 +705,9 @@ export default function Spin() {
           const ca = Math.cos(ang), sa = Math.sin(ang)
           ctx.globalAlpha = alpha * ra; ctx.fillStyle = color; ctx.strokeStyle = color
           ctx.beginPath()
-          // a tapered hairline: pointed at both ends and thickest in the middle, `half` long each way and `w` across, lying along (dx, dy)
-          const lens = (dx: number, dy: number, half: number, w: number) => {
-            const nx = -dy * w, ny = dx * w
-            ctx.moveTo(x - dx * half, y - dy * half)
-            ctx.quadraticCurveTo(x + nx, y + ny, x + dx * half, y + dy * half)
-            ctx.quadraticCurveTo(x - nx, y - ny, x - dx * half, y - dy * half)
-            ctx.closePath(); ctx.fill()
-          }
           switch (rg.voice) { // every instrument has its own shape
-            case 'kalimba': lens(ca, sa, r * 1.6 * m, Math.max(1.1, r * 0.26)); break // a long, fine needle
-            case 'marimba': lens(ca, sa, r * 1.4 * m, r * 0.55); break // a shorter, fuller blade
+            case 'kalimba': lens(ctx, x, y, ca, sa, r * 1.6 * m, Math.max(1.1, r * 0.26)); break // a long, fine needle
+            case 'marimba': lens(ctx, x, y, ca, sa, r * 1.4 * m, r * 0.55); break // a shorter, fuller blade
             case 'bowl': { // a bowl in profile: a flat rim facing outward with sharp pointed corners, and a smooth round belly
               const w = r * 1.4 * (deg < 0 ? 1 : 0.88 + 0.12 * m), d = w * 0.62, tx = -sa, ty = ca
               const pt = (u: number, v: number): [number, number] => [x + tx * w * u + ca * d * v, y + ty * w * u + sa * d * v] // u across the bowl, v from belly (-) to rim (+)
@@ -753,12 +773,12 @@ export default function Spin() {
 
   const pointerAngle = (e: React.PointerEvent) => {
     const r = wrap.current!.getBoundingClientRect()
-    return Math.atan2(e.clientY - (r.top + s.current.H * s.current.cyFrac), e.clientX - (r.left + s.current.W / 2))
+    return Math.atan2(e.clientY - (r.top + s.current.H * s.current.cyFrac), e.clientX - (r.left + s.current.cx))
   }
   // which ring a touch belongs to: the one whose edge is nearest to where the finger landed (a lone ring takes a touch anywhere)
   const pickRing = (e: React.PointerEvent): Ring | null => {
     const st = s.current, box = wrap.current!.getBoundingClientRect()
-    const dist = Math.hypot(e.clientX - (box.left + st.W / 2), e.clientY - (box.top + st.H * st.cyFrac))
+    const dist = Math.hypot(e.clientX - (box.left + st.cx), e.clientY - (box.top + st.H * st.cyFrac))
     let best: Ring | null = null, bd = Infinity
     for (const rg of st.rings) {
       if (rg.leaving) continue
@@ -829,11 +849,11 @@ export default function Spin() {
     if (!on) note(7, rings.find((r) => r.voice === v)!)
     say(`${VOICE_LABELS[v]} ${on ? 'off' : 'on'}`)
   }
-  const layerOn: Record<LayerName, boolean> = { pad: padOn, sub: subOn, vinyl: vinylOn, loop: loopMode === 'rec' || loopMode === 'play' }
+  const layerOn: Record<LayerName, boolean> = { pad: padOn, sub: subOn, vinyl: vinylOn }
   // Loop, step by step: 1. tap the record button and spin the rings. 2. tap again when done: the sample starts looping at once, and the controls give way to two choices, loop and discard.
   // Loop stops the sample and goes back to the instruments (touching a ring does the same but lets it keep playing); discard deletes it. 3. the sample sits in the bottom row, and tapping it brings the two choices back.
-  const loopStart = () => { const lp = loopRef.current; if (undoRef.current) { clearTimeout(undoRef.current.timer); undoRef.current = null; setUndoable(false) } lp.pausedAt = 0; lp.mode = 'rec'; lp.t0 = performance.now(); lp.frames = []; setRecSecs(0); setLoopMode('rec') }
-  const loopPlay = (resume = false) => { const lp = loopRef.current; lp.mode = 'play'; lp.repeat = true; lp.t0 = performance.now() - (resume ? lp.pausedAt * 1000 : 0); lp.fresh = true; setPlayProg(resume && lp.dur ? lp.pausedAt / lp.dur : 0); setLoopMode('play') }
+  const loopStart = () => { const lp = loopRef.current; if (undoRef.current) { clearTimeout(undoRef.current.timer); undoRef.current = null; setUndoable(false) } lp.pausedAt = 0; lp.mode = 'rec'; lp.t0 = performance.now(); lp.frames = []; setProg(0); setLoopMode('rec') }
+  const loopPlay = (resume = false) => { const lp = loopRef.current; lp.mode = 'play'; lp.repeat = true; lp.t0 = performance.now() - (resume ? lp.pausedAt * 1000 : 0); lp.fresh = true; setProg(resume && lp.dur ? lp.pausedAt / lp.dur : 0); setLoopMode('play') }
   const loopTap = () => { // the loop slot in the bottom row
     ensureAudio(); setTouched(true)
     const lp = loopRef.current
@@ -853,7 +873,7 @@ export default function Spin() {
     const lp = loopRef.current
     if (undoRef.current) clearTimeout(undoRef.current.timer)
     undoRef.current = { frames: lp.frames, dur: lp.dur, timer: window.setTimeout(() => { undoRef.current = null; setUndoable(false) }, 6000) }
-    lp.mode = 'idle'; lp.frames = []; lp.dur = 0; lp.pausedAt = 0; setLoopMode('idle'); setReviewing(false); setUndoable(true); say('Discarded')
+    lp.mode = 'idle'; lp.frames = []; lp.dur = 0; lp.pausedAt = 0; setLoopMode('idle'); setReviewing(false); setUndoable(true); say('Discarded · undo available')
   }
   const loopUndo = () => {
     const u = undoRef.current, lp = loopRef.current
@@ -871,8 +891,8 @@ export default function Spin() {
     if (loopMode !== 'rec' && loopMode !== 'play') return
     const id = window.setInterval(() => {
       const lp = loopRef.current, t = (performance.now() - lp.t0) / 1000
-      if (lp.mode === 'rec') { setRecSecs(t); if (t >= LOOP_MAX) loopTap() }
-      else if (lp.mode === 'play' && lp.dur > 0) setPlayProg((t % lp.dur) / lp.dur)
+      if (lp.mode === 'rec') { setProg(Math.min(1, t / LOOP_MAX)); if (t >= LOOP_MAX) loopTap() }
+      else if (lp.mode === 'play' && lp.dur > 0) setProg((t % lp.dur) / lp.dur)
     }, 60)
     return () => clearInterval(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -881,14 +901,12 @@ export default function Spin() {
     ensureAudio(); setTouched(true)
     if (name === 'pad') { setPadOn(on); setPad(on) }
     else if (name === 'sub') { setSubOn(on); setSub(on) }
-    else if (name === 'loop') return true // the loop has its own three-step tap (layerToggle); dragging its volume must not start a recording
     else { setVinylOn(on); setVinyl(on) }
     return true
   }
   const layerToggle = (name: LayerName) => { // a plain tap or click
-    if (name === 'loop') { loopTap(); return }
     const on = !layerOn[name]
-    if (on && levelsRef.current[name] < 0.05) setLevel(name, DEFAULT_LEVEL)
+    if (on && levelsRef.current[name] < 0.05) setLevel(name, START_LEVELS[name])
     layerSet(name, on); say(`${LAYER_LABELS[name]} ${on ? 'on' : 'off'}`)
   }
   // a layer button: tap to switch it on or off; press and drag up or down to set its volume (a drag switches it on)
@@ -898,7 +916,7 @@ export default function Spin() {
   }
   const layerMove = (e: React.PointerEvent) => {
     const d = drag.current
-    if (!d || d.name === 'loop') return // the sample has no volume of its own: that is the device's
+    if (!d) return
     const dy = d.y0 - e.clientY
     if (!d.moved && Math.abs(dy) > 8) { d.moved = true; if (!layerOn[d.name]) layerSet(d.name, true) }
     if (d.moved) { const lv = Math.max(0, Math.min(1, d.lvl0 + dy / 110)); setLevel(d.name, lv); say(`${LAYER_LABELS[d.name]} ${Math.round(lv * 100)}%`) }
@@ -911,7 +929,7 @@ export default function Spin() {
     if (!d.moved) layerToggle(name) // a plain tap
   }
   const layerKey = (name: LayerName) => (e: React.KeyboardEvent) => { // keyboard: arrow up and down change the volume
-    if (name === 'loop' || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
     e.preventDefault(); e.stopPropagation()
     const lv = Math.max(0, Math.min(1, levelsRef.current[name] + (e.key === 'ArrowUp' ? 0.1 : -0.1)))
     if (!layerOn[name]) layerSet(name, true)
@@ -936,6 +954,7 @@ export default function Spin() {
     setBw(on)
   }
   const stop = (e: React.PointerEvent) => { e.stopPropagation(); poke() }
+  const dockPos: React.CSSProperties = land ? { left: 'auto', right: 8, width: LAND_PANEL - 8 } : { left: 8, right: 8, maxWidth: 420, margin: '0 auto' }
   const hintBottom = dockOpen ? (lookOpen ? 200 : 144) - (layersOpen ? 0 : 54) : 36 // the hint sits in the gap between the rings and the controls
 
   // keyboard access to the spinner itself: arrows spin it
@@ -948,13 +967,15 @@ export default function Spin() {
   }
 
   return (
-    <div ref={wrap} className="sp-root"
+    <main ref={wrap} className="sp-root"
       onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
-      style={{ position: 'fixed', top: 0, bottom: 0, left: 0, right: 0, maxWidth: 520, margin: '0 auto', background: 'var(--bg)', overflow: 'hidden', touchAction: 'none', userSelect: 'none',
+      style={{ position: 'fixed', top: 0, bottom: 0, left: 0, right: 0, maxWidth: land ? 'none' : 520, margin: '0 auto', background: 'var(--bg)', overflow: 'hidden', touchAction: 'manipulation', userSelect: 'none', // the spinner surface keeps touch-action none (its rings need every finger); the controls around it leave zoom to the browser
+       
         fontFamily: SANS,
         ['--bg' as string]: theme.bg, ['--ink' as string]: theme.ink, ['--pill' as string]: theme.pill, ['--pillb' as string]: theme.pillBorder,
         ['--pillt' as string]: theme.pillText, ['--pressed' as string]: theme.pressed, ['--onaccent' as string]: theme.onAccent, ['--accent' as string]: theme.ink } as React.CSSProperties}>
       <style>{CSS}</style>
+      <h1 className="sp-vh">Spin</h1>
       <canvas ref={cvs} aria-hidden="true" style={{ width: '100%', height: '100%', display: 'block' }} />
       {/* the spinner is its own focus stop (not the whole screen), so the buttons and radios around it keep their normal screen-reader behaviour */}
       <div className="sp-spin" tabIndex={0} role="group" aria-label="Spinner. Arrow keys spin every ring." onKeyDown={onKey} />
@@ -962,11 +983,11 @@ export default function Spin() {
       <div className="sp-vh" role="status" aria-live="polite">{caption ?? (loopMode === 'rec' ? 'Recording. Tap the red record button to finish.' : null)}</div>
       {TUNING && <TunePanel />}
 
-      <div style={{ position: 'absolute', left: 0, right: 0, bottom: `calc(var(--safe-bottom) + ${hintBottom}px)`, textAlign: 'center',
+      <div style={{ position: 'absolute', left: 0, right: land ? LAND_PANEL : 0, bottom: `calc(var(--safe-bottom) + ${land ? 16 : hintBottom}px)`, textAlign: 'center',
         color: 'var(--ink)', pointerEvents: 'none', opacity: touched ? 0 : 1, transition: 'opacity .3s ease-out' }}>
         <div style={{ fontSize: 22, fontWeight: 200, letterSpacing: 1 }}>Flick to spin</div>
       </div>
-      {undoable && !reviewing && <button type="button" className="sp-undo" onPointerDown={stop} onClick={loopUndo} style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', bottom: `calc(var(--safe-bottom) + ${hintBottom + 36}px)`, zIndex: 2 }}>Undo discard</button>}
+      {undoable && !reviewing && <button type="button" className="sp-undo" onPointerDown={stop} onClick={loopUndo} style={{ position: 'absolute', left: land ? `calc((100% - ${LAND_PANEL}px) / 2)` : '50%', transform: 'translateX(-50%)', bottom: `calc(var(--safe-bottom) + ${land ? 56 : hintBottom + 36}px)`, zIndex: 2 }}>Undo discard</button>}
       {/* the sample: top left. Record, and once there is a recording, a button that brings back its play, pause and discard choices */}
       <div onPointerDown={stop} style={{ position: 'absolute', zIndex: 1, top: 'calc(var(--safe-top) + 8px)', left: 8, ...hideWhenLooping(chrome ? 0.9 : 0.6) }}>
         <button type="button" ref={recBtn} className="sp-lay" aria-label={loopMode === 'rec' ? 'Recording. Tap when done' : loopMode === 'idle' ? 'Record a sample' : 'Sample. Tap for play, pause and discard'}
@@ -974,8 +995,8 @@ export default function Spin() {
           {loopMode === 'rec' ? <svg {...iconProps} className="sp-rec"><circle cx="12" cy="12" r="5.5" fill={REC_RED} stroke="none" /></svg>
             : loopMode === 'idle' ? <svg {...iconProps}><circle cx="12" cy="12" r="5.500" fill="currentColor" stroke="none" /></svg>
             : SAMPLE_ICON}
-          {(loopMode === 'rec' || loopMode === 'play') && <svg className="ring" viewBox="0 0 44 44" aria-hidden="true"><circle cx="22" cy="22" r="20" fill="none" stroke={loopMode === 'rec' ? REC_RED : 'var(--ink)'} strokeWidth="2" strokeLinecap="round"
-            strokeDasharray={`${125.66 * (loopMode === 'rec' ? Math.min(1, recSecs / LOOP_MAX) : playProg)} 125.66`} /></svg>}
+          {(loopMode === 'rec' || loopMode === 'play') && <svg className="ring" viewBox="0 0 44 44" aria-hidden="true"><circle ref={ringTL} cx="22" cy="22" r="20" fill="none" stroke={loopMode === 'rec' ? REC_RED : 'var(--ink)'} strokeWidth="2" strokeLinecap="round"
+            strokeDasharray={`${125.66 * progRef.current} 125.66`} /></svg>}
         </button>
       </div>
       {/* quick actions are toggle buttons: constant label, state in aria-pressed */}
@@ -1005,7 +1026,7 @@ export default function Spin() {
       {/* sound controls: two compact rows under the spinner, never a modal, so you can change them mid-spin */}
       <div id="spin-sound" className="sp-dock" role="group" aria-label="Sound" onPointerDown={stop}
         onPointerMove={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()} onPointerCancel={(e) => e.stopPropagation()}
-        style={{ position: 'absolute', left: 8, right: 8, bottom: `calc(var(--safe-bottom) + ${lookOpen && !reviewing ? 72 : 16}px)`, maxWidth: 420, margin: '0 auto', /* with the palette open the instruments stay put and rise to make room beneath */
+        style={{ position: 'absolute', ...dockPos, bottom: `calc(var(--safe-bottom) + ${lookOpen && !reviewing ? 72 : 16}px)`, /* with the palette open the instruments stay put and rise to make room beneath */
           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, color: 'var(--ink)',
           ...dockMotion(0.8, dockOpen || reviewing) }}>
         <div aria-hidden="true" className="sp-cap">{caption ?? (reviewing ? (loopMode === 'play' ? 'Playing recording' : 'Paused') : null)}</div>
@@ -1014,7 +1035,7 @@ export default function Spin() {
           <div role="group" aria-label="Sample" style={{ display: 'flex', gap: 16 }}>
             <button type="button" ref={pauseBtn} className="sp-lay" aria-label={loopMode === 'play' ? 'Pause' : 'Play'} onClick={loopLoop}>
               {loopMode === 'play' ? PAUSE_ICON : PLAY_ICON}
-              <svg className="ring" viewBox="0 0 44 44" aria-hidden="true"><circle cx="22" cy="22" r="20" fill="none" stroke="var(--ink)" strokeWidth="2" strokeLinecap="round" strokeDasharray={`${125.66 * playProg} 125.66`} /></svg>
+              <svg className="ring" viewBox="0 0 44 44" aria-hidden="true"><circle ref={ringMenu} cx="22" cy="22" r="20" fill="none" stroke="var(--ink)" strokeWidth="2" strokeLinecap="round" strokeDasharray={`${125.66 * progRef.current} 125.66`} /></svg>
             </button>
             <button type="button" className="sp-lay" aria-label="Discard the sample and exit" onClick={loopDiscard}>{TRASH_ICON}</button>
           </div>
@@ -1024,7 +1045,7 @@ export default function Spin() {
           <legend className="sp-vh">Instruments on the screen</legend>
           <div className="sp-insrow">
             {VOICES.map((v) => (
-              <label key={v} className="sp-ins" style={{ ['--vc' as string]: theme.accents[v], ['--onvc' as string]: onColour(theme.accents[v]) } as React.CSSProperties}>
+              <label key={v} className="sp-ins" style={{ ['--vc' as string]: theme.accents[v], ['--onvc' as string]: iconOn } as React.CSSProperties}>
                 <input type="checkbox" value={v} checked={active.includes(v)} onChange={() => toggleVoice(v)} />
                 <span className="ic">{VOICE_ICONS[v]}<b className="sp-vh">{VOICE_LABELS[v]}</b></span>
               </label>
@@ -1033,7 +1054,7 @@ export default function Spin() {
         </fieldset>
         {/* independent layers: tap to switch on or off, press and drag up or down for volume */}
         {layersOpen && <div id="spin-layers" role="group" aria-label="Layers" style={{ display: 'flex', gap: 8 }}>
-          {LAYERS.filter((n) => n !== 'loop').map((n) => (
+          {LAYERS.map((n) => (
             <button key={n} type="button" role="switch" className="sp-lay" aria-checked={layerOn[n]}
               aria-label={`${LAYER_LABELS[n]}${layerOn[n] ? `, volume ${Math.round(levels[n] * 100)}%` : ''}. Arrow up and down change the volume.`}
               onPointerDown={layerDown(n)} onPointerMove={layerMove} onPointerUp={layerUp(n)} onPointerCancel={() => { drag.current = null }}
@@ -1053,28 +1074,29 @@ export default function Spin() {
       {/* look controls: the palette. They sit under the instruments and layers while open, so every option is visible at once */}
       <div id="spin-look" className="sp-dock" role="group" aria-label="Look" onPointerDown={stop}
         onPointerMove={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()} onPointerCancel={(e) => e.stopPropagation()}
-        style={{ position: 'absolute', left: 8, right: 8, bottom: 'calc(var(--safe-bottom) + 16px)', maxWidth: 420, margin: '0 auto',
+        style={{ position: 'absolute', ...dockPos, bottom: 'calc(var(--safe-bottom) + 16px)',
           display: 'flex', flexDirection: 'column', gap: 10, color: 'var(--ink)', ...dockMotion(0.8, dockOpen && lookOpen && !reviewing) }}>
         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 16 }}>
-        <fieldset className="sp-fs"><legend className="sp-vh">Theme</legend>
-          <div className="sp-row">
-            <div className="sp-pills">
-              {THEME_IDS.map((id) => (
-                <label key={id} className="sp-pill sw">
-                  <input type="radio" name="theme" value={id} checked={themeId === id} onChange={() => switchTheme(id)} />
-                  <span style={{ color: 'var(--ink)' }}>{THEME_ICONS[id]}<b className="sp-vh">{id === 'mono' ? 'Dark' : 'Light'}</b></span>
-                </label>
-              ))}
-            </div></div>
-        </fieldset>
+        <div className="sp-row">
+          <button type="button" role="switch" aria-checked={themeId === 'chalk'} aria-label="Light theme" className="sp-tog" onClick={() => switchTheme(themeId === 'chalk' ? 'mono' : 'chalk')}>
+            <i className="sp-knob" style={{ transform: themeId === 'chalk' ? 'translateX(36px)' : 'none' }} />
+            <span className="sp-sw" style={{ display: 'grid', placeItems: 'center' }}>{THEME_ICONS.mono}</span>
+            <span className="sp-sw" style={{ display: 'grid', placeItems: 'center' }}>{THEME_ICONS.chalk}</span>
+          </button></div>
         <div className="sp-row">
           <button type="button" role="switch" aria-checked={bw} aria-label="Black and white" className="sp-tog" onClick={() => switchBw(!bw)}>
             <i className="sp-knob" style={{ transform: bw ? 'translateX(36px)' : 'none' }} />
-            <i className="sp-sw" style={{ background: `conic-gradient(${VOICES.map((v) => THEMES[themeId].accents[v]).join(', ')}, ${THEMES[themeId].accents[VOICES[0]]})` }} />
+            <svg className="sp-sw" viewBox="-10 -10 20 20" aria-hidden="true">{/* five flat wedges, one per instrument colour, round a hollow centre: no gradient */}
+              {VOICES.map((v, i) => {
+                const a0 = (i / VOICES.length) * Math.PI * 2 - Math.PI / 2, a1 = ((i + 1) / VOICES.length) * Math.PI * 2 - Math.PI / 2, R = 10, r = 4.2
+                const P = (rad: number, ang: number) => `${(rad * Math.cos(ang)).toFixed(2)} ${(rad * Math.sin(ang)).toFixed(2)}`
+                return <path key={v} fill={THEMES[themeId].accents[v]} d={`M${P(r, a0)}L${P(R, a0)}A${R} ${R} 0 0 1 ${P(R, a1)}L${P(r, a1)}A${r} ${r} 0 0 0 ${P(r, a0)}Z`} />
+              })}
+            </svg>
             <i className="sp-sw" style={{ background: `linear-gradient(90deg, ${theme.ink} 50%, ${theme.bg} 50%)`, boxShadow: `inset 0 0 0 1px ${theme.pillBorder}` }} />
           </button></div>
         </div>
       </div>
-    </div>
+    </main>
   )
 }

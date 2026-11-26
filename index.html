@@ -6,14 +6,14 @@
       name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
     />
-    <meta name="theme-color" content="#0d0d0d" />
+    <meta name="theme-color" content="#0e1216" />
     <script>
       // paint the page in the saved (or device) palette before the app loads, so a Chalk visitor on a dark phone never sees a dark flash
       try {
         if (!location.hash || location.hash === '#/spin') {
           var j = JSON.parse(localStorage.getItem('spin-look') || 'null')
           var light = j && j.theme ? j.theme === 'chalk' : matchMedia('(prefers-color-scheme: light)').matches
-          var c = light ? '#f4f4f2' : '#0d0d0d'
+          var c = light ? '#dfe3e6' : '#0e1216'
           document.documentElement.style.setProperty('--bg', c)
           document.querySelector('meta[name="theme-color"]').setAttribute('content', c)
         }
