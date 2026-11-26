@@ -7,13 +7,25 @@
       content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
     />
     <meta name="theme-color" content="#0d0d0d" />
+    <script>
+      // paint the page in the saved (or device) palette before the app loads, so a Chalk visitor on a dark phone never sees a dark flash
+      try {
+        if (!location.hash || location.hash === '#/spin') {
+          var j = JSON.parse(localStorage.getItem('spin-look') || 'null')
+          var light = j && j.theme ? j.theme === 'chalk' : matchMedia('(prefers-color-scheme: light)').matches
+          var c = light ? '#f4f4f2' : '#0d0d0d'
+          document.documentElement.style.setProperty('--bg', c)
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', c)
+        }
+      } catch (e) {}
+    </script>
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Spin" />
-    <meta name="description" content="Spin: a calm, flick-to-spin fidget toy with soft instruments, ambient layers and a breathing guide. Best on a phone, with sound on." />
+    <meta name="description" content="Spin: a calm, flick-to-spin fidget toy with soft instruments and ambient layers. Best on a phone, with sound on." />
     <meta property="og:title" content="Spin" />
-    <meta property="og:description" content="A calm, flick-to-spin fidget toy with soft instruments, ambient layers and a breathing guide. Best on a phone, with sound on." />
+    <meta property="og:description" content="A calm, flick-to-spin fidget toy with soft instruments and ambient layers. Best on a phone, with sound on." />
     <meta property="og:type" content="website" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <title>Spin</title>

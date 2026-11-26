@@ -6,10 +6,11 @@ Live: **https://taikatuuli.github.io/mobile-lab/** (opens straight into Spin; th
 
 A calm, flick-to-spin fidget toy. Best on a phone, with sound on. No goal, score or fail state.
 
-- **Spin it:** flick or drag around the center. It has inertia and never quite stops. Every detent plays a soft note.
-- **Five instruments**, each with its own sound and its own shape: Bowl (crescents), Kalimba (thin lines), Marimba (thick bars), Drops (a five-round spiral of dots in lanes that turn in opposite directions) and Ripple (a rippled ring where the ripple that just sounded is the biggest).
-- **Five background layers** you can stack: Pad, Air (follows spin speed), Ocean (slow waves), Sub hum and Vinyl crackle.
-- **Look:** Mono, Chalk or Blush. Remembered on the device.
+- **Spin it:** flick or drag around the center. It has inertia and glides to a stop. Every detent plays a soft note.
+- **Five instruments**, each with its own sound and its own shape: Bowl (crescents), Kalimba (thin lines), Marimba (thick bars), Ripple (a rippled ring where the ripple that just sounded is the biggest, with a tongue-drum sound) and Bass (a ring of round beads, with a warm plucked bass).
+- **Play several at once:** tap any combination of instruments and each gets its own ring, nested from the biggest (Bowl, with extra crescents) to the smallest (Bass). Touch a ring to spin just that one; each keeps its own speed and notes.
+- **Three background layers** you can stack: Pad, Sub hum and Vinyl crackle.
+- **Look:** Mono (dark) or Chalk (light). Remembered on the device.
 - **Accessible:** real radio and switch controls, keyboard support (arrow keys spin it), reduced-motion handling, and the audio unlocks on the first tap on iOS.
 
 Everything is synthesised with Web Audio and drawn on a canvas: no audio files, no images, no backend.

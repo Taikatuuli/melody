@@ -10,16 +10,16 @@ Next steps for the experiment, in the order they were raised. Everything lives i
   - Related: Ripple's pluck plus three echoes, and its wobble, are in `note()` and the `ripple` branch of the draw loop.
 
 - [ ] **Make the background layers feel better when they switch on and off.**
-  Improve the interaction when a base sound (Pad, Air, Ocean, Sub hum, Vinyl) turns on or off.
+  Improve the interaction when a base sound (Pad, Sub hum, Vinyl) turns on or off.
   - Done when: switching a layer has a clear, pleasant response in both sound (a fade that feels right) and visuals (the icon, ring and caption), and it never clicks or pops.
 
 ## Look and interface
 
-- [ ] **Swap the icons for better ones.**
+- [x] **Swap the icons for better ones.**
   Replace the current instrument and layer icons with clearer, better-looking ones.
-  - Done when: each icon is recognizable at 20px and in both palettes, and no two icons look alike (Ocean and Ripple are both waves today).
+  - Done when: each icon is recognizable at 20px and in both palettes, and no two icons look alike.
 
-- [ ] **Remove the unnecessary palettes: keep just dark and light.**
+- [x] **Remove the unnecessary palettes: keep just dark and light.**
   Cut the palette choice down to one dark and one light look.
   - Done when: Mono (dark) and Chalk (light) are the only two, Blush is removed, and the Look swatch row and saved setting still work.
 
