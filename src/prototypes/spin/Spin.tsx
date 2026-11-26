@@ -275,14 +275,15 @@ export default function Spin() {
   const [pokeTick, setPokeTick] = useState(0)
   const [themeId, setThemeId] = useState<ThemeId>(readLook) // restored from the last visit
   const [bw, setBw] = useState<boolean>(readBw) // black and white mode, restored from the last visit
-  const [lookOpen, setLookOpen] = useState(false)
   const levelsRef = useRef<Record<LayerName, number>>(readLevels())
   const [levels, setLevels] = useState(levelsRef.current)
   const [caption, setCaption] = useState<string | null>(null) // what the line above the dock says while you're touching a layer
   const captionTimer = useRef(0)
   const drag = useRef<{ name: LayerName; y0: number; lvl0: number; moved: boolean } | null>(null)
-  const [layersOpen, setLayersOpen] = useState(true) // show or hide the background sound buttons (they keep playing); the instruments stay
-  const [dockOpen, setDockOpen] = useState(true) // show or hide the instrument, layer and look controls
+  // three panels along the bottom, each with its own button in the top bar: the instruments, the background sounds (the mixer) and the look controls. Any mix can be open at once.
+  const [instOpen, setInstOpen] = useState(true)
+  const [layersOpen, setLayersOpen] = useState(true)
+  const [lookOpen, setLookOpen] = useState(false)
   const theme: Theme = bw ? { ...THEMES[themeId], accents: BW_ACCENTS[themeId] } : THEMES[themeId]
   const iconOn = themeId === 'chalk' && !bw ? '#ffffff' : theme.bg // one icon colour for every coloured button in a theme, so they match: white on the light theme's deeper colours, the dark shell on the dark theme's bright ones (all at least 4:1)
   const reduceRef = useRef(false) // prefers-reduced-motion
@@ -303,7 +304,11 @@ export default function Spin() {
   const landRef = useRef(false)
   landRef.current = land
   const reserveRef = useRef(144) // how much of the bottom the controls cover, so the rings stay clear of them
-  reserveRef.current = reviewing ? 134 : dockOpen ? ( (lookOpen ? 216 : 188) - (layersOpen ? 0 : 54)) : 80 // the controls plus the 'Flick to spin' line above them
+  // where the stack of open panels ends: the sound dock (a caption line plus whichever of the instrument and mixer rows are open) sits above the look row when that is open
+  const sndH = instOpen || layersOpen ? 24 + (instOpen ? 44 : 0) + (layersOpen ? 44 : 0) + (instOpen && layersOpen ? 10 : 0) : 0
+  const sndBottom = lookOpen ? 72 : 16
+  const stackTop = sndH ? sndBottom + sndH : lookOpen ? 52 : 0
+  reserveRef.current = reviewing ? 134 : stackTop === 0 ? 80 : stackTop + (lookOpen && sndH ? 22 : 50) // the open panels plus the 'Flick to spin' line above them
   const sRef = useRef<SpinState | null>(null)
   if (!sRef.current) sRef.current = { rings: [...active].sort((x, y) => RING_ORDER.indexOf(x) - RING_ORDER.indexOf(y)).map((v) => ({ ...newRing(v, 0.15), alpha: 1 })), th: THEMES.mono as Theme, fbT: -1, muted: false, cyFrac: 0.44, cx: 0, W: 0, H: 0 }
   const s = sRef as { current: SpinState }
@@ -955,7 +960,7 @@ export default function Spin() {
   }
   const stop = (e: React.PointerEvent) => { e.stopPropagation(); poke() }
   const dockPos: React.CSSProperties = land ? { left: 'auto', right: 8, width: LAND_PANEL - 8 } : { left: 8, right: 8, maxWidth: 420, margin: '0 auto' }
-  const hintBottom = dockOpen ? (lookOpen ? 200 : 144) - (layersOpen ? 0 : 54) : 36 // the hint sits in the gap between the rings and the controls
+  const hintBottom = stackTop === 0 ? 36 : stackTop + 6 // the hint sits in the gap between the rings and the controls
 
   // keyboard access to the spinner itself: arrows spin it
   const onKey = (e: React.KeyboardEvent) => {
@@ -1003,17 +1008,17 @@ export default function Spin() {
       <div onPointerDown={stop} style={{ position: 'absolute', top: 'calc(var(--safe-top) + 8px)', left: 8, right: 8,
         display: 'flex', justifyContent: 'flex-end', ...hideWhenLooping(chrome ? 0.9 : 0.6) }}>
         <div style={{ display: 'flex' }}>
-          <button type="button" className="sp-btn" aria-label="Controls" aria-pressed={dockOpen} aria-controls={lookOpen ? 'spin-look' : 'spin-sound'} style={iconBtn(dockOpen)}
-            onClick={() => { poke(); if (dockOpen) setLookOpen(false); setDockOpen(!dockOpen) }}> {/* hiding also closes the swatches, so the controls always come back as the instruments and layers */}
+          <button type="button" className="sp-btn" aria-label="Instruments" aria-pressed={instOpen} aria-controls="spin-sound" style={iconBtn(instOpen)}
+            onClick={() => { poke(); setInstOpen(!instOpen) }}>
             <PanelIcon />
           </button>
-          <button type="button" className="sp-btn" aria-label={(padOn || subOn || vinylOn) ? 'Background sounds, some playing' : 'Background sounds'} aria-pressed={layersOpen && dockOpen} aria-controls="spin-layers" style={{ ...iconBtn(layersOpen && dockOpen), position: 'relative' }}
-            onClick={() => { poke(); if (!dockOpen) { setDockOpen(true); setLookOpen(false); setLayersOpen(true) } else setLayersOpen(!layersOpen) }}>
+          <button type="button" className="sp-btn" aria-label={(padOn || subOn || vinylOn) ? 'Background sounds, some playing' : 'Background sounds'} aria-pressed={layersOpen} aria-controls="spin-layers" style={{ ...iconBtn(layersOpen), position: 'relative' }}
+            onClick={() => { poke(); setLayersOpen(!layersOpen) }}>
             <LayersIcon />
-            {(padOn || subOn || vinylOn) && !(layersOpen && dockOpen) && <i aria-hidden="true" style={{ position: 'absolute', top: 9, right: 9, width: 7, height: 7, borderRadius: '50%', background: 'var(--ink)' }} />}
+            {(padOn || subOn || vinylOn) && !layersOpen && <i aria-hidden="true" style={{ position: 'absolute', top: 9, right: 9, width: 7, height: 7, borderRadius: '50%', background: 'var(--ink)' }} />}
           </button>
-          <button type="button" className="sp-btn" aria-label="Look" aria-pressed={lookOpen && dockOpen} aria-controls="spin-look" style={iconBtn(lookOpen && dockOpen)}
-            onClick={() => { poke(); setLookOpen(dockOpen ? !lookOpen : true); setDockOpen(true) }}>
+          <button type="button" className="sp-btn" aria-label="Look" aria-pressed={lookOpen} aria-controls="spin-look" style={iconBtn(lookOpen)}
+            onClick={() => { poke(); setLookOpen(!lookOpen) }}>
             <LookIcon />
           </button>
           <button type="button" className="sp-btn" aria-label="Mute" aria-pressed={muted} style={iconBtn(muted)}
@@ -1026,9 +1031,9 @@ export default function Spin() {
       {/* sound controls: two compact rows under the spinner, never a modal, so you can change them mid-spin */}
       <div id="spin-sound" className="sp-dock" role="group" aria-label="Sound" onPointerDown={stop}
         onPointerMove={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()} onPointerCancel={(e) => e.stopPropagation()}
-        style={{ position: 'absolute', ...dockPos, bottom: `calc(var(--safe-bottom) + ${lookOpen && !reviewing ? 72 : 16}px)`, /* with the palette open the instruments stay put and rise to make room beneath */
+        style={{ position: 'absolute', ...dockPos, bottom: `calc(var(--safe-bottom) + ${reviewing ? 16 : sndBottom}px)`,
           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, color: 'var(--ink)',
-          ...dockMotion(0.8, dockOpen || reviewing) }}>
+          ...dockMotion(0.8, instOpen || layersOpen || reviewing) }}>
         <div aria-hidden="true" className="sp-cap">{caption ?? (reviewing ? (loopMode === 'play' ? 'Playing recording' : 'Paused') : null)}</div>
         {reviewing ? (
           /* the sample menu: only play or pause (it plays over and over until paused) and discard, so there is nothing else to tap */
@@ -1041,6 +1046,7 @@ export default function Spin() {
           </div>
         ) : (<>
         {/* any combination: each icon puts its own ring on the screen, and the rings nest from the biggest (left) to the smallest (right) */}
+        {instOpen && (
         <fieldset className="sp-fs">
           <legend className="sp-vh">Instruments on the screen</legend>
           <div className="sp-insrow">
@@ -1052,6 +1058,7 @@ export default function Spin() {
             ))}
           </div>
         </fieldset>
+        )}
         {/* independent layers: tap to switch on or off, press and drag up or down for volume */}
         {layersOpen && <div id="spin-layers" role="group" aria-label="Layers" style={{ display: 'flex', gap: 8 }}>
           {LAYERS.map((n) => (
@@ -1075,7 +1082,7 @@ export default function Spin() {
       <div id="spin-look" className="sp-dock" role="group" aria-label="Look" onPointerDown={stop}
         onPointerMove={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()} onPointerCancel={(e) => e.stopPropagation()}
         style={{ position: 'absolute', ...dockPos, bottom: 'calc(var(--safe-bottom) + 16px)',
-          display: 'flex', flexDirection: 'column', gap: 10, color: 'var(--ink)', ...dockMotion(0.8, dockOpen && lookOpen && !reviewing) }}>
+          display: 'flex', flexDirection: 'column', gap: 10, color: 'var(--ink)', ...dockMotion(0.8, lookOpen && !reviewing) }}>
         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 16 }}>
         <div className="sp-row">
           <button type="button" role="switch" aria-checked={themeId === 'chalk'} aria-label="Light theme" className="sp-tog" onClick={() => switchTheme(themeId === 'chalk' ? 'mono' : 'chalk')}>
