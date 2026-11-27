@@ -68,7 +68,7 @@ const rotAt = (frames: LoopFrame[], voice: Voice, tt: number): number | null => 
 }
 type LayerName = 'pad' | 'sub' | 'vinyl'
 const LAYERS: LayerName[] = ['pad', 'sub', 'vinyl']
-const LAYER_LABELS: Record<LayerName, string> = { pad: 'Pad', sub: 'Sub hum', vinyl: 'Vinyl' }
+const LAYER_LABELS: Record<LayerName, string> = { pad: 'Pad', sub: 'Sub hum', vinyl: 'Vinyl crackle' }
 // on a phone held sideways the controls move to a column on the right and the rings take the rest, instead of being squeezed into a strip between them
 const LAND_PANEL = 276
 const isLandscape = (w: number, h: number) => h > 0 && h < 440 && w > h * 1.25 // measured on the screen itself, so a phone frame on a desktop page is judged by its own size
@@ -113,14 +113,14 @@ type Theme = {
   pill: string; pillBorder: string; pillText: string; pressed: string; onAccent: string; accents: Record<Voice, string>
 }
 const THEMES = {
-  // Walkman: a cool silver shell by day, a blue-black one by night, with the orange, yellow, blue, teal and red of an 80s portable.
+  // Walkman shell: cool silver by day, blue-black by night. The instrument colours, in order (Bowl, Kalimba, Marimba, Handpan, Bass), are purple, yellow, blue, green and pink.
   // Every accent is at least 3:1 against its own background; the light yellow, orange and teal are a shade deeper than the shell paint so they pass
   mono: { name: 'Mono', bg: '#0e1216', ink: '#e6ecf0', ring: '#2a323a', dust: ['#39424b', '#2b333b', '#20272e'],
     pill: '#171d23', pillBorder: '#2a323a', pillText: '#98a3ad', pressed: '#212932', onAccent: '#0e1216',
-    accents: { bowl: '#ff7f3a', kalimba: '#ffd21f', marimba: '#4a8dff', drops: '#ff5043', ripple: '#27c2c4' } },
-  chalk: { name: 'Chalk', bg: '#dfe3e6', ink: '#14181c', ring: '#b4bcc2', dust: ['#aab3ba', '#bec5ca', '#cbd1d5'],
-    pill: '#d3d8dc', pillBorder: '#bcc3c9', pillText: '#4f5861', pressed: '#c7cdd2', onAccent: '#dfe3e6',
-    accents: { bowl: '#d25818', kalimba: '#967800', marimba: '#1f5fbf', drops: '#e0392d', ripple: '#148d8f' } },
+    accents: { bowl: '#a56cff', kalimba: '#ffe14a', marimba: '#4a8dff', drops: '#ff5fa8', ripple: '#54f59a' } },
+  chalk: { name: 'Chalk', bg: '#e4e4e2', ink: '#111111', ring: '#c4c4c2', dust: ['#b6b6b4', '#c9c9c7', '#d6d6d4'],
+    pill: '#d9d9d7', pillBorder: '#c8c8c6', pillText: '#555555', pressed: '#cfcfcd', onAccent: '#e4e4e2',
+    accents: { bowl: '#d93a2b', kalimba: '#111111', marimba: '#1d4fa8', drops: '#c48a00', ripple: '#111111' } },
 } satisfies Record<string, Theme>
 type ThemeId = keyof typeof THEMES
 // relative size of the five scale degrees' shapes (Kalimba tines and Marimba bars shorten up the scale, Drops dots are biggest on the first)
@@ -128,18 +128,16 @@ const KEYS = [1.15, 0.95, 0.6, 1.05, 0.8] as const
 const SANS = '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif'
 const dotSize = (n: number) => Math.max(3, Math.min(10, 21 / Math.sqrt(n))) // fewer dots are bigger, more dots smaller
 const LOOK_KEY = 'spin-look'
-const readLook = (): ThemeId => {
-  const osLight = window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'chalk' : 'mono' // first visit follows the device
+const readLook = (): ThemeId => { // the dark theme, unless you chose otherwise on an earlier visit
   try {
     const j = JSON.parse(localStorage.getItem(LOOK_KEY) || '{}')
-    return j.theme in THEMES ? j.theme : osLight
-  } catch { return osLight }
+    return j.theme in THEMES ? j.theme : 'mono'
+  } catch { return 'mono' }
 }
-const readBw = (): boolean => { try { return JSON.parse(localStorage.getItem(LOOK_KEY) || '{}').bw === true } catch { return false } }
 // black and white mode: every ring is plain ink, no greys. The shapes (and the Colour/B&W swatch) tell them apart
 const BW_ACCENTS: Record<ThemeId, Record<Voice, string>> = {
   mono: { bowl: '#e6ecf0', kalimba: '#e6ecf0', marimba: '#e6ecf0', drops: '#e6ecf0', ripple: '#e6ecf0' },
-  chalk: { bowl: '#14181c', kalimba: '#14181c', marimba: '#14181c', drops: '#14181c', ripple: '#14181c' },
+  chalk: { bowl: '#111111', kalimba: '#111111', marimba: '#111111', drops: '#111111', ripple: '#111111' },
 }
 // the Ripple outline is sampled at this many points per frame: kept outside the frame loop so nothing is allocated while it runs
 const RIPPLE_SEG = 360
@@ -177,7 +175,7 @@ const VOICE_ICONS: Record<Voice, React.ReactElement> = {
   })}</svg>,
   ripple: <svg {...iconProps}><path d={RIPPLE_ICON} /></svg>,
 }
-const TRASH_ICON = <svg {...iconProps}><path d="M5 7h14" /><path d="M10 7V5h4v2" /><path d="M7 7l1 12h8l1-12" /></svg>
+const EXIT_ICON = <svg {...iconProps}><path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /></svg> // a return arrow: out of the recording and back to the main app
 const PLAY_ICON = <svg {...iconProps}><path d="M8.500 5.500v13l10-6.500z" /></svg>
 const PAUSE_ICON = <svg {...iconProps}><path d="M9 6v12M15 6v12" /></svg>
 const SAMPLE_ICON = <svg {...iconProps}><path d="M5 10v4M9 6.500v11M13 3.500v17M17 7.500v9M21 10.500v3" /></svg> // a little waveform: the saved sample
@@ -291,7 +289,6 @@ export default function Spin() {
   const [chrome, setChrome] = useState(true)
   const [pokeTick, setPokeTick] = useState(0)
   const [themeId, setThemeId] = useState<ThemeId>(readLook) // restored from the last visit
-  const [bw, setBw] = useState<boolean>(readBw) // black and white mode, restored from the last visit
   const levelsRef = useRef<Record<LayerName, number>>(readLevels())
   const [levels, setLevels] = useState(levelsRef.current)
   const [caption, setCaption] = useState<string | null>(null) // what the line above the dock says while you're touching a layer
@@ -334,8 +331,8 @@ export default function Spin() {
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cue]) // with every instrument gone, the row to pick one from is always showing
-  const theme: Theme = bw ? { ...THEMES[themeId], accents: BW_ACCENTS[themeId] } : THEMES[themeId]
-  const iconOn = themeId === 'chalk' && !bw ? '#ffffff' : theme.bg // one icon colour for every coloured button in a theme, so they match: white on the light theme's deeper colours, the dark shell on the dark theme's bright ones (all at least 4:1)
+  const theme: Theme = { ...THEMES[themeId], accents: BW_ACCENTS[themeId] } // black and white only: every ring is plain ink
+  const iconOn = theme.bg // the buttons are ink, so their icons are the page colour
   const reduceRef = useRef(false) // prefers-reduced-motion
   const padRef = useRef<{ gain: GainNode; oscs: OscillatorNode[]; lfo: OscillatorNode; timer: number } | null>(null)
   const subRef = useRef<Layer | null>(null)
@@ -380,8 +377,8 @@ export default function Spin() {
   }, [theme.bg, themeId])
 
   useEffect(() => {
-    try { localStorage.setItem(LOOK_KEY, JSON.stringify({ theme: themeId, bw })) } catch { /* private mode */ }
-  }, [themeId, bw])
+    try { localStorage.setItem(LOOK_KEY, JSON.stringify({ theme: themeId })) } catch { /* private mode */ }
+  }, [themeId])
 
   const say = (text: string) => { // show a short note above the dock, and put the instrument's name back a moment later
     setCaption(text); clearTimeout(captionTimer.current); captionTimer.current = window.setTimeout(() => setCaption(null), 900)
@@ -747,14 +744,20 @@ export default function Spin() {
       const outer = shown[0]
       st.dustR = st.dustR ? st.dustR + ((outer ? outer.R : base) - st.dustR) * Math.min(1, dt * 6) : (outer ? outer.R : base)
       st.dustSpin = outer ? outer.rot : st.dustSpin + 0.12 * dt
-      for (let k = 1; k <= 3; k++) {
-        const rk = st.dustR * bf * (1 + 0.42 * k), n = 14 + k * 8
+      // the rings of specks carry on outward until they leave the page, at the same spacing, so a wide window is filled and not just a column of it
+      const farthest = Math.hypot(Math.max(cx, W - cx), Math.max(cy, H - cy)) + 12
+      const kMax = Math.min(16, Math.max(3, Math.ceil((farthest / (st.dustR * bf) - 1) / 0.42)))
+      for (let k = 1; k <= kMax; k++) {
+        const rk = st.dustR * bf * (1 + 0.42 * k), n = Math.max(14 + k * 8, Math.round((Math.PI * 2 * rk) / 58))
         const rot = st.dustSpin * (k % 2 ? -0.35 : 0.2) / k
-        ctx.fillStyle = th.dust[k - 1]
+        ctx.fillStyle = th.dust[Math.min(k, 3) - 1]
+        ctx.beginPath()
         for (let i = 0; i < n; i++) {
-          const ang = rot + (i / n) * Math.PI * 2
-          ctx.beginPath(); ctx.arc(cx + Math.cos(ang) * rk, cy + Math.sin(ang) * rk, 1.7, 0, Math.PI * 2); ctx.fill()
+          const ang = rot + (i / n) * Math.PI * 2, px = cx + Math.cos(ang) * rk, py = cy + Math.sin(ang) * rk
+          if (px < -4 || px > W + 4 || py < -4 || py > H + 4) continue // off the page: not drawn
+          ctx.moveTo(px + 1.7, py); ctx.arc(px, py, 1.7, 0, Math.PI * 2)
         }
+        ctx.fill()
       }
 
       // the shapes scale with the space between neighbouring rings, so the gap between Bowl, Kalimba and Marimba stays in proportion at any size
@@ -994,7 +997,7 @@ export default function Spin() {
   const loopDiscard = () => { // deleting is final: the background sounds go back as they were when the recording ended, and the record button returns
     const lp = loopRef.current
     for (const n of lp.layers) applyLayer(n, lp.layerFinal[n])
-    lp.mode = 'idle'; lp.frames = []; lp.dur = 0; lp.pausedAt = 0; lp.layers = []; lp.layerEvents = []; setLoopMode('idle'); setReviewing(false); say('Discarded')
+    lp.mode = 'idle'; lp.frames = []; lp.dur = 0; lp.pausedAt = 0; lp.layers = []; lp.layerEvents = []; setLoopMode('idle'); setReviewing(false);
   }
   loopEnd.current = () => setLoopMode('ready')
   useEffect(() => { // keep keyboard and screen-reader focus with you: onto Pause when the menu opens, back onto the record button when it closes
@@ -1065,11 +1068,6 @@ export default function Spin() {
     if (el) { el.dataset.switching = '1'; requestAnimationFrame(() => requestAnimationFrame(() => { delete el.dataset.switching })) }
     setThemeId(id)
   }
-  const switchBw = (on: boolean) => { // same quiet switch as a palette change
-    const el = wrap.current
-    if (el) { el.dataset.switching = '1'; requestAnimationFrame(() => requestAnimationFrame(() => { delete el.dataset.switching })) }
-    setBw(on)
-  }
   const stop = (e: React.PointerEvent) => { e.stopPropagation(); poke() }
   const dockPos: React.CSSProperties = land ? { left: 'auto', right: 8, width: LAND_PANEL - 8 } : { left: 8, right: 8, maxWidth: 420, margin: '0 auto' }
 
@@ -1085,7 +1083,7 @@ export default function Spin() {
   return (
     <main ref={wrap} className="sp-root"
       onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
-      style={{ position: 'fixed', top: 0, bottom: 0, left: 0, right: 0, maxWidth: land ? 'none' : 520, margin: '0 auto', background: 'var(--bg)', overflow: 'hidden', touchAction: 'manipulation', userSelect: 'none', // the spinner surface keeps touch-action none (its rings need every finger); the controls around it leave zoom to the browser
+      style={{ position: 'fixed', top: 0, bottom: 0, left: 0, right: 0, background: 'var(--bg)', overflow: 'hidden', touchAction: 'manipulation', userSelect: 'none', // the spinner surface keeps touch-action none (its rings need every finger); the controls around it leave zoom to the browser
        
         fontFamily: SANS,
         ['--bg' as string]: theme.bg, ['--ink' as string]: theme.ink, ['--pill' as string]: theme.pill, ['--pillb' as string]: theme.pillBorder,
@@ -1105,7 +1103,7 @@ export default function Spin() {
         {active.length === 0 ? <>Tap an instrument<br />to start playing</> : <>Spin to<br />play</>}
       </div>
       {/* the sample: top left. Record, and once there is a recording, a button that brings back its play, pause and discard choices */}
-      <div onPointerDown={stop} style={{ position: 'absolute', zIndex: 1, top: 'calc(var(--safe-top) + 8px)', left: 8, ...hideWhenLooping(chrome ? 0.9 : 0.6) }}>
+      <div onPointerDown={stop} style={{ position: 'absolute', zIndex: 1, top: 'calc(var(--safe-top) + 8px)', left: land ? 8 : 'max(8px, calc(50% - 252px))', ...hideWhenLooping(chrome ? 0.9 : 0.6) }}>
         <button type="button" ref={recBtn} className="sp-lay" aria-label={loopMode === 'rec' ? 'Recording. Tap when done' : loopMode === 'idle' ? 'Record a sample' : 'Sample. Tap for play, pause and discard'}
           style={(loopMode === 'rec' || loopMode === 'play' || reviewing) ? { background: 'var(--pressed)', color: 'var(--ink)' } : undefined} onClick={loopTap}>
           {loopMode === 'rec' ? <svg {...iconProps} className="sp-rec"><circle cx="12" cy="12" r="5.5" fill={REC_RED} stroke="none" /></svg>
@@ -1116,7 +1114,7 @@ export default function Spin() {
         </button>
       </div>
       {/* quick actions are toggle buttons: constant label, state in aria-pressed */}
-      <div onPointerDown={stop} style={{ position: 'absolute', top: 'calc(var(--safe-top) + 8px)', left: 8, right: 8,
+      <div onPointerDown={stop} style={{ position: 'absolute', top: 'calc(var(--safe-top) + 8px)', left: 8, right: 8, maxWidth: land ? 'none' : 520, margin: '0 auto',
         display: 'flex', justifyContent: 'flex-end', ...hideWhenLooping(chrome ? 0.9 : 0.6) }}>
         <div style={{ display: 'flex', gap: 8 }}>
           <button type="button" className="sp-btn" aria-label="Instruments" aria-pressed={instOpen} aria-controls="spin-sound" style={iconBtn(instOpen)}
@@ -1153,7 +1151,7 @@ export default function Spin() {
               {loopMode === 'play' ? PAUSE_ICON : PLAY_ICON}
               <svg className="ring" viewBox="0 0 44 44" aria-hidden="true"><circle ref={ringMenu} cx="22" cy="22" r="20" fill="none" stroke="var(--ink)" strokeWidth="2" strokeLinecap="round" strokeDasharray={`${125.66 * progRef.current} 125.66`} /></svg>
             </button>
-            <button type="button" className="sp-lay" aria-label="Discard the sample and exit" onClick={loopDiscard}>{TRASH_ICON}</button>
+            <button type="button" className="sp-lay" aria-label="Exit the recording and go back" onClick={loopDiscard}>{EXIT_ICON}</button>
           </div>
         ) : (<>
         {/* any combination: each icon puts its own ring on the screen, and the rings nest from the biggest (left) to the smallest (right) */}
@@ -1200,18 +1198,6 @@ export default function Spin() {
             <i className="sp-knob" style={{ transform: themeId === 'chalk' ? 'translateX(36px)' : 'none' }} />
             <span className="sp-sw" style={{ display: 'grid', placeItems: 'center' }}>{THEME_ICONS.mono}</span>
             <span className="sp-sw" style={{ display: 'grid', placeItems: 'center' }}>{THEME_ICONS.chalk}</span>
-          </button></div>
-        <div className="sp-row">
-          <button type="button" role="switch" aria-checked={bw} aria-label="Black and white" className="sp-tog" onClick={() => switchBw(!bw)}>
-            <i className="sp-knob" style={{ transform: bw ? 'translateX(36px)' : 'none' }} />
-            <svg className="sp-sw" viewBox="-10 -10 20 20" aria-hidden="true">{/* five flat wedges, one per instrument colour, round a hollow centre: no gradient */}
-              {VOICES.map((v, i) => {
-                const a0 = (i / VOICES.length) * Math.PI * 2 - Math.PI / 2, a1 = ((i + 1) / VOICES.length) * Math.PI * 2 - Math.PI / 2, R = 10, r = 4.2
-                const P = (rad: number, ang: number) => `${(rad * Math.cos(ang)).toFixed(2)} ${(rad * Math.sin(ang)).toFixed(2)}`
-                return <path key={v} fill={THEMES[themeId].accents[v]} d={`M${P(r, a0)}L${P(R, a0)}A${R} ${R} 0 0 1 ${P(R, a1)}L${P(r, a1)}A${r} ${r} 0 0 0 ${P(r, a0)}Z`} />
-              })}
-            </svg>
-            <i className="sp-sw" style={{ background: `linear-gradient(90deg, ${theme.ink} 50%, ${theme.bg} 50%)`, boxShadow: `inset 0 0 0 1px ${theme.pillBorder}` }} />
           </button></div>
         </div>
       </div>
