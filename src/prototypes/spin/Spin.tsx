@@ -70,6 +70,20 @@ const LAYER_LABELS: Record<LayerName, string> = { pad: 'Pad', sub: 'Sub hum', vi
 // on a phone held sideways the controls move to a column on the right and the rings take the rest, instead of being squeezed into a strip between them
 const LAND_PANEL = 276
 const isLandscape = (w: number, h: number) => h > 0 && h < 440 && w > h * 1.25 // measured on the screen itself, so a phone frame on a desktop page is judged by its own size
+// First-run guidance: no tour and no welcome screen, just a quiet cue at the moment each feature is first in reach. The first is "Spin to play" in the middle of the rings, until you spin one;
+// after that a cue at a time appears (instruments, then the mixer, then recording), waits for you, fades by itself, and is remembered. Using the feature skips its cue. Add ?intro to the address to see them all again.
+const ONBOARD_KEY = 'spin-onboarding:v1'
+type Cue = 'instruments' | 'mixer' | 'record'
+type Seen = Partial<Record<'spin' | Cue, boolean>>
+const CUE_ORDER: Cue[] = ['instruments', 'mixer', 'record']
+const CUE_TEXT: Record<Cue, string> = { instruments: 'Tap an instrument to layer it', mixer: 'Tap a sound to add depth', record: 'Record a loop' }
+const readSeen = (): Seen => {
+  try {
+    if (new URLSearchParams(location.search).has('intro')) { localStorage.removeItem(ONBOARD_KEY); return {} }
+    const j = JSON.parse(localStorage.getItem(ONBOARD_KEY) || '{}')
+    return j && typeof j === 'object' ? j : {}
+  } catch { return {} }
+}
 const LOOP_MAX = 30 // the longest loop that can be recorded, in seconds
 const REC_RED = '#e5484d' // the record dot and its timer ring
 const DEFAULT_LEVEL = 0.6 // the volume a layer's sound was designed at: a layer's volume is 0 to 1, and its gain is volume / this
@@ -219,9 +233,6 @@ fieldset.sp-fs{border:0;margin:0;padding:0;min-width:0}
 .sp-lay svg.ic{width:20px;height:20px}
 .sp-lay svg.ring{position:absolute;left:-1px;top:-1px;width:44px;height:44px;pointer-events:none;transform:rotate(-90deg)}
 .sp-lay:active{scale:.96}
-.sp-undo{position:relative;height:36px;padding:0 18px;border-radius:999px;border:1px solid var(--pillb);background:var(--pill);color:var(--ink);font-size:13px;letter-spacing:.3px;cursor:pointer}
-.sp-undo::after{content:'';position:absolute;inset:-4px}
-.sp-undo:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 .sp-rec{animation:sp-rec 1.1s ease-in-out infinite}
 @keyframes sp-rec{50%{opacity:.35}}
 .sp-lay:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
@@ -260,8 +271,6 @@ export default function Spin() {
   const [loopMode, setLoopMode] = useState<LoopMode>('idle')
   const [reviewing, setReviewing] = useState(false) // the sample menu: save, loop or discard. It replaces the other controls while it is open
   const loopEnd = useRef<() => void>()
-  const [undoable, setUndoable] = useState(false) // a discarded sample can be brought back for a few seconds
-  const undoRef = useRef<{ frames: LoopFrame[]; dur: number; layers: LayerName[]; init: Record<LayerName, LayerState>; final: Record<LayerName, LayerState>; events: LayerEvent[]; timer: number } | null>(null)
   const pauseBtn = useRef<HTMLButtonElement>(null)
   const recBtn = useRef<HTMLButtonElement>(null)
   const wasReviewing = useRef(false)
@@ -291,13 +300,40 @@ export default function Spin() {
   const [instOpen, setInstOpen] = useState(true)
   const [layersOpen, setLayersOpen] = useState(true)
   const [lookOpen, setLookOpen] = useState(false)
+  const [seen, setSeen] = useState<Seen>(readSeen) // which first-run cues have been dealt with, remembered between visits
+  const seenRef = useRef(seen)
+  const markSeen = (k: 'spin' | Cue) => {
+    if (seenRef.current[k]) return
+    const n = { ...seenRef.current, [k]: true }
+    seenRef.current = n; setSeen(n)
+    try { localStorage.setItem(ONBOARD_KEY, JSON.stringify(n)) } catch { /* private mode */ }
+  }
+  const [cue, setCue] = useState<Cue | null>(null)
   const [emptyHint, setEmptyHint] = useState(false) // the 'tap an instrument' hint waits a couple of seconds after the last one goes, so it only shows if you pause
   useEffect(() => {
     if (active.length > 0) { setEmptyHint(false); return }
     const t = window.setTimeout(() => setEmptyHint(true), 2200)
     return () => clearTimeout(t)
   }, [active.length])
-  useEffect(() => { if (active.length === 0) setInstOpen(true) }, [active.length]) // with every instrument gone, the row to pick one from is always showing
+  useEffect(() => { if (active.length === 0) setInstOpen(true) }, [active.length])
+  useEffect(() => { // pick the next cue: only once you have spun a ring, one at a time, never while recording or with nothing on screen
+    setCue(null)
+    if (!seen.spin || active.length === 0 || reviewing || loopMode !== 'idle') return
+    const next = CUE_ORDER.find((k) => !seen[k])
+    if (!next) return
+    if (next === 'instruments' && active.length > 1) { markSeen('instruments'); return } // already layering: nothing to teach
+    if (next === 'mixer' && (padOn || subOn || vinylOn)) { markSeen('mixer'); return }
+    if ((next === 'instruments' && !instOpen) || (next === 'mixer' && !layersOpen)) return // wait until the panel the cue points at is showing
+    const t = window.setTimeout(() => setCue(next), next === 'instruments' ? 6000 : 9000)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seen, active.length, reviewing, loopMode, instOpen, layersOpen, padOn, subOn, vinylOn])
+  useEffect(() => { // a cue fades after a few seconds and counts as seen
+    if (!cue) return
+    const t = window.setTimeout(() => { markSeen(cue); setCue(null) }, 7000)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cue]) // with every instrument gone, the row to pick one from is always showing
   const theme: Theme = bw ? { ...THEMES[themeId], accents: BW_ACCENTS[themeId] } : THEMES[themeId]
   const iconOn = themeId === 'chalk' && !bw ? '#ffffff' : theme.bg // one icon colour for every coloured button in a theme, so they match: white on the light theme's deeper colours, the dark shell on the dark theme's bright ones (all at least 4:1)
   const reduceRef = useRef(false) // prefers-reduced-motion
@@ -624,13 +660,18 @@ export default function Spin() {
       st.cyFrac += (cyTarget - st.cyFrac) * Math.min(1, dt * 9)
       const cx = lnd ? (W - LAND_PANEL) / 2 : W / 2, cy = H * st.cyFrac
       st.cx = cx
-      if (arrowRef.current) arrowRef.current.style.transform = `translate(${cx.toFixed(1)}px, ${cy.toFixed(1)}px) translate(-50%, -50%)` // the spin cue sits at the centre of the rings
       const room = Math.max(Math.min((bottom - top) / 2 - 16, lnd ? cx - 16 : Infinity), 40) // the biggest ring that clears both
       const base = Math.min(Math.min(W, H) * 0.25, room)
       st.rings = st.rings.filter((r) => !(r.leaving && r.alpha < 0.01)) // a ring that has finished fading out is gone
       const rings = st.rings
       const shown = rings.filter((r) => !r.leaving)
       const K = shown.length
+      if (arrowRef.current) {
+        arrowRef.current.style.transform = `translate(${cx.toFixed(1)}px, ${cy.toFixed(1)}px) translate(-50%, -50%)` // the cue sits at the centre of the rings
+        let innerR = Infinity; for (const r of rings) if (!r.leaving) innerR = Math.min(innerR, r.R || base)
+        if (!isFinite(innerR)) innerR = base
+        arrowRef.current.style.fontSize = `${Math.max(10, Math.min(14, innerR * 0.14)).toFixed(1)}px` // and its size follows the space inside the smallest ring
+      }
       // ---- layout: one instrument is the classic ring; several nest from the biggest (first in the dock) to the smallest
       const rTop = K > 1 ? Math.max(Math.min(base * 1.75, cx - 24, room), 40) : base
       const rMin = K > 1 ? Math.max(Math.min(52, rTop * 0.55), rTop - (K - 1) * 30) : 0 // neighbouring rings sit no more than 30px apart: with two or three instruments the inner ring moves out toward the outer one
@@ -721,7 +762,8 @@ export default function Spin() {
         const accent = th.accents[rg.voice]
         if (rg.replay && !rg.leaving && !ripple) { // a ring the loop is turning gets a fine track, so you can see it is playing itself (it goes when you take hold of it)
           ctx.globalAlpha = 0.6 * ra; ctx.strokeStyle = th.ring; ctx.lineWidth = 1
-          ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1
+          const trackR = rg.voice === 'bowl' ? R + r0 * 1.35 * 0.97 * 0.62 * 0.45 : R // a bowl's flat rim, its outer edge, is where a line falls most naturally; the other shapes are centred on the ring
+          ctx.beginPath(); ctx.arc(cx, cy, trackR, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1
         }
         // no guide line behind any of the shapes: the dots alone make the ring (Ripple's rippled line is the shape itself)
 
@@ -819,6 +861,7 @@ export default function Spin() {
   const down = (e: React.PointerEvent) => {
     ensureAudio(); setTouched(true); setPokeTick((n) => n + 1)
     const rg = pickRing(e)
+    if (rg) markSeen('spin') // the first ring you take hold of ends the 'Spin to play' cue for good
     if (!rg || rg.dragging) return // a second finger on a ring that is already held never takes it over; another ring can be held at the same time
     wrap.current!.setPointerCapture(e.pointerId)
     rg.pid = e.pointerId
@@ -859,7 +902,7 @@ export default function Spin() {
   const poke = () => setPokeTick((n) => n + 1)
   // an instrument icon puts its ring on the screen or takes it off (at least one stays); the rings re-nest by their order in the dock
   const toggleVoice = (v: Voice) => {
-    ensureAudio(); setTouched(true)
+    ensureAudio(); setTouched(true); markSeen('instruments')
     const on = active.includes(v)
     const next = VOICES.filter((x) => (x === v ? !on : active.includes(x)))
     setActive(next)
@@ -878,7 +921,7 @@ export default function Spin() {
   layerOnRef.current = layerOn // read by the loop functions, which the 30 second timer can call from an older render
   // Loop, step by step: 1. tap the record button and spin the rings. 2. tap again when done: the sample starts looping at once, and the controls give way to two choices, loop and discard.
   // Loop stops the sample and goes back to the instruments (touching a ring does the same but lets it keep playing); discard deletes it. 3. the sample sits in the bottom row, and tapping it brings the two choices back.
-  const loopStart = () => { const lp = loopRef.current; if (undoRef.current) { clearTimeout(undoRef.current.timer); undoRef.current = null; setUndoable(false) } lp.pausedAt = 0; lp.mode = 'rec'; lp.t0 = performance.now(); lp.frames = []; lp.layerInit = snapLayers(); lp.layerEvents = []; lp.evIdx = 0; setProg(0); setLoopMode('rec') }
+  const loopStart = () => { const lp = loopRef.current; lp.pausedAt = 0; lp.mode = 'rec'; lp.t0 = performance.now(); lp.frames = []; lp.layerInit = snapLayers(); lp.layerEvents = []; lp.evIdx = 0; setProg(0); setLoopMode('rec') }
   // The background sounds are part of a recording: the ones that were playing when you finished are noted, play again with the sample, and stop when you pause it
   const snapLayers = () => { const o = noLayers(); for (const n of LAYERS) o[n] = { on: layerOnRef.current[n], level: levelsRef.current[n] }; return o }
   const applyLayer = (n: LayerName, st: LayerState) => { // set a background sound to a recorded state, without writing it down or saving its volume
@@ -901,7 +944,7 @@ export default function Spin() {
   }
   const loopPlay = (resume = false) => { const lp = loopRef.current; lp.mode = 'play'; lp.repeat = true; lp.t0 = performance.now() - (resume ? lp.pausedAt * 1000 : 0); lp.fresh = true; setProg(resume && lp.dur ? lp.pausedAt / lp.dur : 0); setLoopMode('play') } // the draw loop starts the background sounds from the loop's clock
   const loopTap = () => { // the loop slot in the bottom row
-    ensureAudio(); setTouched(true)
+    ensureAudio(); setTouched(true); markSeen('record')
     const lp = loopRef.current
     if (lp.mode === 'idle') loopStart()
     else if (lp.mode === 'rec') {
@@ -915,18 +958,10 @@ export default function Spin() {
     if (lp.mode === 'play') { lp.pausedAt = lp.dur > 0 ? (((performance.now() - lp.t0) / 1000) % lp.dur) : 0; lp.mode = 'ready'; setLoopMode('ready'); silenceSample(); say('Paused') }
     else { loopPlay(true); say('Playing recording') }
   }
-  const loopDiscard = () => { // the sample is kept for six seconds, so an accidental discard can be undone
+  const loopDiscard = () => { // deleting is final: the background sounds go back as they were when the recording ended, and the record button returns
     const lp = loopRef.current
-    if (undoRef.current) clearTimeout(undoRef.current.timer)
-    undoRef.current = { frames: lp.frames, dur: lp.dur, layers: lp.layers, init: lp.layerInit, final: lp.layerFinal, events: lp.layerEvents, timer: window.setTimeout(() => { undoRef.current = null; setUndoable(false) }, 6000) }
-    for (const n of lp.layers) applyLayer(n, lp.layerFinal[n]) // leaving puts the background sounds back as they were when the recording ended
-    lp.mode = 'idle'; lp.frames = []; lp.dur = 0; lp.pausedAt = 0; lp.layers = []; lp.layerEvents = []; setLoopMode('idle'); setReviewing(false); setUndoable(true); say('Discarded · undo available')
-  }
-  const loopUndo = () => {
-    const u = undoRef.current, lp = loopRef.current
-    if (!u || lp.mode !== 'idle') return
-    clearTimeout(u.timer); undoRef.current = null; setUndoable(false)
-    lp.frames = u.frames; lp.dur = u.dur; lp.layers = u.layers; lp.layerInit = u.init; lp.layerFinal = u.final; lp.layerEvents = u.events; lp.pausedAt = 0; setReviewing(true); loopPlay(); say('Restored')
+    for (const n of lp.layers) applyLayer(n, lp.layerFinal[n])
+    lp.mode = 'idle'; lp.frames = []; lp.dur = 0; lp.pausedAt = 0; lp.layers = []; lp.layerEvents = []; setLoopMode('idle'); setReviewing(false); say('Discarded')
   }
   loopEnd.current = () => setLoopMode('ready')
   useEffect(() => { // keep keyboard and screen-reader focus with you: onto Pause when the menu opens, back onto the record button when it closes
@@ -954,6 +989,7 @@ export default function Spin() {
     return true
   }
   const layerToggle = (name: LayerName) => { // a plain tap or click
+    markSeen('mixer')
     const on = !layerOn[name]
     if (on && levelsRef.current[name] < 0.05) setLevel(name, START_LEVELS[name])
     layerSet(name, on); say(`${LAYER_LABELS[name]} ${on ? 'on' : 'off'}`)
@@ -1004,13 +1040,12 @@ export default function Spin() {
   }
   const stop = (e: React.PointerEvent) => { e.stopPropagation(); poke() }
   const dockPos: React.CSSProperties = land ? { left: 'auto', right: 8, width: LAND_PANEL - 8 } : { left: 8, right: 8, maxWidth: 420, margin: '0 auto' }
-  const hintBottom = stackTop === 0 ? 36 : stackTop + 6 // the hint sits in the gap between the rings and the controls
 
   // keyboard access to the spinner itself: arrows spin it
   const onKey = (e: React.KeyboardEvent) => {
     if (e.target !== e.currentTarget) return
     poke(); ensureAudio()
-    const push = (d: number) => { for (const r of s.current.rings) if (!r.leaving) r.w = Math.max(-TUNE.maxW, Math.min(TUNE.maxW, r.w + d)); setTouched(true); e.preventDefault() } // arrows spin every ring
+    const push = (d: number) => { for (const r of s.current.rings) if (!r.leaving) r.w = Math.max(-TUNE.maxW, Math.min(TUNE.maxW, r.w + d)); setTouched(true); markSeen('spin'); e.preventDefault() } // arrows spin every ring
     if (e.key === 'ArrowRight') push(3)
     else if (e.key === 'ArrowLeft') push(-3)
   }
@@ -1029,15 +1064,17 @@ export default function Spin() {
       {/* the spinner is its own focus stop (not the whole screen), so the buttons and radios around it keep their normal screen-reader behaviour */}
       <div className="sp-spin" tabIndex={0} role="group" aria-label="Spinner. Arrow keys spin every ring." onKeyDown={onKey} />
       {/* spoken updates for what the caption shows: a layer switching on or off, or its volume */}
-      <div className="sp-vh" role="status" aria-live="polite">{caption ?? (loopMode === 'rec' ? 'Recording. Tap the red record button to finish.' : null)}</div>
+      <div className="sp-vh" role="status" aria-live="polite">{caption ?? (loopMode === 'rec' ? 'Recording. Tap the red record button to finish.' : cue ? CUE_TEXT[cue] : null)}</div>
       {TUNING && <TunePanel />}
 
       {/* the cue: a few quiet words in the middle of the rings (the frame loop keeps them centred). "Spin to play" until you touch anything; with no instruments, "Tap an instrument…" after a pause */}
       <div ref={arrowRef} style={{ position: 'absolute', left: 0, top: 0, width: 'max-content', maxWidth: 230, textAlign: 'center', textWrap: 'balance', color: 'var(--ink)', pointerEvents: 'none', fontSize: 13, fontWeight: 300, letterSpacing: 2, lineHeight: 1.5, textTransform: 'uppercase',
-        opacity: active.length === 0 ? (emptyHint ? 0.55 : 0) : (touched ? 0 : 0.55), transition: 'opacity .6s ease-out' }}>
-        {active.length === 0 ? 'Tap an instrument to start playing' : 'Spin to play'}
+        opacity: active.length === 0 ? (emptyHint ? 0.55 : 0) : (seen.spin ? 0 : 0.55), transition: 'opacity .6s ease-out' }}>
+        {active.length === 0 ? <>Tap an instrument<br />to start playing</> : <>Spin to<br />play</>}
       </div>
-      {undoable && !reviewing && <button type="button" className="sp-undo" onPointerDown={stop} onClick={loopUndo} style={{ position: 'absolute', left: land ? `calc((100% - ${LAND_PANEL}px) / 2)` : '50%', transform: 'translateX(-50%)', bottom: `calc(var(--safe-bottom) + ${land ? 56 : hintBottom + 36}px)`, zIndex: 2 }}>Undo discard</button>}
+      {/* the record cue: a few quiet words under the record button, once, after you have settled in */}
+      <div aria-hidden="true" style={{ position: 'absolute', left: 12, top: 'calc(var(--safe-top) + 56px)', display: 'flex', alignItems: 'center', color: 'var(--ink)', pointerEvents: 'none', whiteSpace: 'nowrap', fontSize: 11, fontWeight: 400, letterSpacing: 2, textTransform: 'uppercase',
+        opacity: cue === 'record' && loopMode === 'idle' && !reviewing ? 0.6 : 0, transition: 'opacity .6s ease-out' }}>{CUE_TEXT.record}</div>
       {/* the sample: top left. Record, and once there is a recording, a button that brings back its play, pause and discard choices */}
       <div onPointerDown={stop} style={{ position: 'absolute', zIndex: 1, top: 'calc(var(--safe-top) + 8px)', left: 8, ...hideWhenLooping(chrome ? 0.9 : 0.6) }}>
         <button type="button" ref={recBtn} className="sp-lay" aria-label={loopMode === 'rec' ? 'Recording. Tap when done' : loopMode === 'idle' ? 'Record a sample' : 'Sample. Tap for play, pause and discard'}
@@ -1052,7 +1089,7 @@ export default function Spin() {
       {/* quick actions are toggle buttons: constant label, state in aria-pressed */}
       <div onPointerDown={stop} style={{ position: 'absolute', top: 'calc(var(--safe-top) + 8px)', left: 8, right: 8,
         display: 'flex', justifyContent: 'flex-end', ...hideWhenLooping(chrome ? 0.9 : 0.6) }}>
-        <div style={{ display: 'flex' }}>
+        <div style={{ display: 'flex', gap: 8 }}>
           <button type="button" className="sp-btn" aria-label="Instruments" aria-pressed={instOpen} aria-controls="spin-sound" style={iconBtn(instOpen)}
             onClick={() => { poke(); setInstOpen(!instOpen) }}>
             <PanelIcon />
@@ -1079,7 +1116,7 @@ export default function Spin() {
         style={{ position: 'absolute', ...dockPos, bottom: `calc(var(--safe-bottom) + ${reviewing ? 16 : sndBottom}px)`,
           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, color: 'var(--ink)',
           ...dockMotion(0.8, instOpen || layersOpen || reviewing) }}>
-        <div aria-hidden="true" className="sp-cap">{caption ?? (reviewing ? (loopMode === 'play' ? 'Playing recording' : 'Paused') : null)}</div>
+        <div aria-hidden="true" className="sp-cap">{caption ?? (reviewing ? (loopMode === 'play' ? 'Playing recording' : 'Paused') : cue === 'instruments' || cue === 'mixer' ? CUE_TEXT[cue] : null)}</div>
         {reviewing ? (
           /* the sample menu: only play or pause (it plays over and over until paused) and discard, so there is nothing else to tap */
           <div role="group" aria-label="Sample" style={{ display: 'flex', gap: 16 }}>
