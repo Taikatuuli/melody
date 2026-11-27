@@ -1,21 +1,18 @@
-# mobile-lab
+# Melody
 
-Live: **https://taikatuuli.github.io/mobile-lab/** (opens straight into Spin; the list of all prototypes is at `#/lab`)
+A calm, flick-to-spin fidget toy that plays soft notes. Best on a phone, with sound on. No goal, score or fail state. (The app itself is still called Spin.)
 
-## Spin
+Started life as a prototype in [mobile-lab](https://github.com/Taikatuuli/mobile-lab); its full history came with it.
 
-A calm, flick-to-spin fidget toy. Best on a phone, with sound on. No goal, score or fail state.
-
-- **Spin it:** flick or drag around the center. It has inertia and glides to a stop. Every detent plays a soft note.
-- **Five instruments**, each with its own sound and its own shape: Bowl (crescents), Kalimba (thin lines), Marimba (thick bars), Ripple (a rippled ring where the ripple that just sounded is the biggest, with a tongue-drum sound) and Bass (a ring of round beads, with a warm plucked bass).
-- **Play several at once:** tap any combination of instruments and each gets its own ring, nested from the biggest (Bowl, with extra crescents) to the smallest (Bass). Touch a ring to spin just that one; each keeps its own speed and notes.
-- **Three background layers** you can stack: Pad, Sub hum and Vinyl crackle.
-- **Look:** Mono (dark) or Chalk (light). Remembered on the device.
+- **Spin it:** flick or drag around the centre. It has inertia and glides to a stop. Every detent plays a soft note.
+- **Five instruments**, each with its own sound and shape: Bowl (crescents), Kalimba (thin lines), Marimba (thick bars), Handpan (a rippled ring where the ripple that just sounded is the biggest) and Bass (a ring of soft diamonds).
+- **Play several at once:** tap any combination of instruments and each gets its own ring. Touch a ring to spin just that one; each keeps its own speed and notes.
+- **Background layers** you can stack: Pad, Sub hum and Vinyl crackle.
+- **Record a loop:** capture what you play, then loop it. Pause it, or exit back to the app.
+- **Look:** black and white only, dark or light. Remembered on the device.
 - **Accessible:** real radio and switch controls, keyboard support (arrow keys spin it), reduced-motion handling, and the audio unlocks on the first tap on iOS.
 
 Everything is synthesised with Web Audio and drawn on a canvas: no audio files, no images, no backend.
-
-A fast sandbox for prototyping mobile experiences. Vite + React + TypeScript + Framer Motion.
 
 ## Run
 
@@ -24,40 +21,18 @@ npm install
 npm run dev
 ```
 
-Vite prints a **Network** URL (e.g. `http://192.168.x.x:5173`). Open it on your phone (same Wi-Fi) to test real touch, safe areas and keyboard behavior. On desktop, prototypes render inside a phone-sized frame.
+Vite prints a **Network** URL (for example `http://192.168.x.x:5173`). Open it on your phone on the same Wi-Fi to test real touch and sound. On desktop the app fills the window.
 
-## Add a prototype
+Add `?tune` to the URL for a panel of live sound and animation values, and `?intro` to see the first-run hints again.
 
-1. Create `src/prototypes/<name>/<Name>.tsx` with a default-exported component.
-2. Register it in `src/prototypes/index.ts`.
-3. Open `#/<slug>`.
-
-## Mobile defaults baked in
-
-- `viewport-fit=cover` + safe-area CSS variables (`--safe-top`, `--safe-bottom`)
-- 16px inputs (no iOS focus zoom), `100dvh`, no tap-highlight flash, no overscroll bounce
-- `touch-action: manipulation`, 44px tap targets, hover only on hover-capable devices
-- Dark mode via `prefers-color-scheme`
-
-## Deploy
-
-`npm run build` outputs `dist/` with relative paths, so it works on GitHub Pages or any static host.
-
-## Claude Code skills
-
-Project skills live in `.claude/skills/`:
-
-- `new-prototype`: scaffold and register a prototype following the repo's mobile rules
-- `simulator-check`: verify a prototype in the iOS Simulator, including gestures
-
-## Archive
-
-Earlier experiments (Invoices, Stack and Orbit) were removed from the app to keep the repo focused. They're kept in git under the tag `archive/early-prototypes`:
+## Build
 
 ```bash
-git show archive/early-prototypes:src/prototypes/invoices/Invoices.tsx
+npm run build
 ```
+
+Outputs `dist/` with relative paths, so it works on GitHub Pages or any static host. The workflow in `.github/workflows/deploy.yml` publishes `main` to GitHub Pages.
 
 ## Next
 
-The list of what's planned is in [TODO.md](TODO.md).
+What's planned is in [TODO.md](TODO.md).

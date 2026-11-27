@@ -1,6 +1,6 @@
-# Spin: to do
+# Melody: to do
 
-Next steps for the experiment, in the order they were raised. Everything lives in `src/prototypes/spin/Spin.tsx` unless noted.
+Next steps for the experiment, in the order they were raised. Everything lives in `src/spin/Spin.tsx` unless noted.
 
 ## Sound and animation
 
