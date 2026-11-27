@@ -158,11 +158,11 @@ const SoundIcon = ({ off }: { off: boolean }) => (
   </svg>
 )
 const vIcon = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true } as const
-// the Ripple shape from the canvas, simplified for 16px: a ring with twelve even crests
-const RIPPLE_ICON = Array.from({ length: 193 }, (_, k) => {
-  const th = (k / 192) * Math.PI * 2, r = 8.2 + 0.9 * Math.cos(th * 12)
+// the logo: two sine waves exactly out of step, wrapped round a ring (five waves each), so the Handpan's icon is the app's icon
+const RIPPLE_ICON = [0, Math.PI].map((ph) => Array.from({ length: 241 }, (_, k) => {
+  const th = (k / 240) * Math.PI * 2, r = 8.3 + 2.3 * Math.cos(th * 5 + ph)
   return `${k ? 'L' : 'M'}${(12 + Math.cos(th) * r).toFixed(2)} ${(12 + Math.sin(th) * r).toFixed(2)}`
-}).join('') + 'Z'
+}).join('') + 'Z')
 // the instrument icons are small copies of the shapes on the rings
 const ico = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2.2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true } as const
 const VOICE_ICONS: Record<Voice, React.ReactElement> = {
@@ -173,7 +173,7 @@ const VOICE_ICONS: Record<Voice, React.ReactElement> = {
     const t = (i / 8) * Math.PI * 2, cx = 12 + Math.cos(t) * 7.6, cy = 12 + Math.sin(t) * 7.6, c = Math.cos(t), n = Math.sin(t), R = 2.6, q = 1.5, f = (v: number) => v.toFixed(2)
     return <path key={i} d={`M${f(cx + c * R)} ${f(cy + n * R)}L${f(cx - n * q)} ${f(cy + c * q)}L${f(cx - c * R)} ${f(cy - n * R)}L${f(cx + n * q)} ${f(cy - c * q)}Z`} fill="currentColor" strokeWidth={1.6} />
   })}</svg>,
-  ripple: <svg {...iconProps}><path d={RIPPLE_ICON} /></svg>,
+  ripple: <svg {...iconProps} strokeWidth={1.2}>{RIPPLE_ICON.map((d, i) => <path key={i} d={d} />)}</svg>,
 }
 const EXIT_ICON = <svg {...iconProps}><path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /></svg> // a return arrow: out of the recording and back to the main app
 const PLAY_ICON = <svg {...iconProps}><path d="M8.500 5.500v13l10-6.500z" /></svg>
