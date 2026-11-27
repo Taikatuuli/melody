@@ -1,4 +1,4 @@
-# Melody
+# ♬ ♬ ♬ Melody ♬ ♬ ♬
 
 A calm, flick-to-spin fidget toy that plays soft notes. Best on a phone, with sound on. No goal, score or fail state. (The app itself is still called Spin.)
 
