@@ -4,6 +4,8 @@ import TunePanel from './TunePanel'
 
 const DOTS = 24 // shapes on the ring (and detents per turn)
 const SCALE = [0, 2, 4, 7, 9] // major pentatonic: every combination sounds consonant
+// how long, in seconds, the picture of a sounded note lasts, matched to how long its tone rings: a bowl's ripple (3.4s tone), a kalimba tine's wobble (0.9s), a marimba bar's swell and flash (0.9s), a bass bead's stretch (2s)
+const SING_LIFE: Partial<Record<Voice, number>> = { bowl: 2.2, kalimba: 1.2, marimba: 0.9, drops: 2 }
 const RIPPLE_LIFE = 0.9 // seconds a ripple lives on the ring: as long as the pluck and its single echo ring
 const clampPan = (x: number) => Math.max(-1, Math.min(1, x))
 // one ripple's swell at t seconds: a fast rise and a slow fall. The sound's pluck and echoes are timed from the same curve
@@ -14,13 +16,13 @@ const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
 type Voice = 'bowl' | 'kalimba' | 'marimba' | 'drops' | 'ripple'
 // one instrument on the screen: its own angle, speed, dots and notes. Several rings can be on screen at once, each spun on its own
 type Ring = {
-  voice: Voice; rot: number; w: number; pulse: Float32Array; pop: Float32Array; pv: Float32Array; hold: Float32Array; n: number; step: number; lastNote: number
+  voice: Voice; rot: number; w: number; pulse: Float32Array; sing: Float32Array; pop: Float32Array; pv: Float32Array; hold: Float32Array; n: number; step: number; lastNote: number
   dragging: boolean; pid: number; lastA: number; lastT: number
   R: number; alpha: number; leaving: boolean
   replay?: boolean // the loop is spinning this ring right now, so it plays itself
 }
 const newRing = (voice: Voice, w = 0): Ring => ({
-  voice, rot: 0, w, pulse: new Float32Array(72), pop: new Float32Array(72), pv: new Float32Array(72), hold: new Float32Array(72), n: DOTS, step: (Math.PI * 2) / DOTS, lastNote: 0,
+  voice, rot: 0, w, pulse: new Float32Array(72), sing: new Float32Array(72), pop: new Float32Array(72), pv: new Float32Array(72), hold: new Float32Array(72), n: DOTS, step: (Math.PI * 2) / DOTS, lastNote: 0,
   dragging: false, pid: -1, lastA: 0, lastT: 0, R: 0, alpha: 0, leaving: false,
 })
 // a detent: Ripple reads `pulse` (it fades linearly), every other shape springs: `hold` keeps the spring's target at 1 for a moment, then it settles back to 0
@@ -263,14 +265,13 @@ export default function Spin() {
   const audio = useRef<AudioBits | null>(null)
   const knockBuf = useRef<AudioBuffer | null>(null) // a tenth of a second of white noise for the mallet knock, made on first use
   const live = useRef<number[]>([]) // when the notes still ringing will end (audio clock seconds)
-  const [touched, setTouched] = useState(false)
   const [active, setActive] = useState<Voice[]>(readRings) // the instruments on the screen, biggest ring first
   const [padOn, setPadOn] = useState(false)
   const [subOn, setSubOn] = useState(false)
   const [vinylOn, setVinylOn] = useState(false)
   const [loopMode, setLoopMode] = useState<LoopMode>('idle')
   const [reviewing, setReviewing] = useState(false) // the sample menu: save, loop or discard. It replaces the other controls while it is open
-  const loopEnd = useRef<() => void>()
+  const loopEnd = useRef<(() => void) | undefined>(undefined)
   const pauseBtn = useRef<HTMLButtonElement>(null)
   const recBtn = useRef<HTMLButtonElement>(null)
   const wasReviewing = useRef(false)
@@ -642,14 +643,18 @@ export default function Spin() {
 
     const frame = () => {
       const now = performance.now() // one clock everywhere (rAF's timestamp can lag event times in Safari)
-      const dt = Math.min((now - last) / 1000, 0.04); last = now
-      const W = box.clientWidth, H = box.clientHeight, dpr = window.devicePixelRatio || 1
-      if (canvas.width !== W * dpr || canvas.height !== H * dpr) {
-        canvas.width = W * dpr; canvas.height = H * dpr; st.W = W; st.H = H
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      const dt = Math.min((now - last) / 1000, 0.04) * TUNE.timeScale; last = now // timeScale < 1 slows the whole animation (the Tune panel's slow motion), so each step of a spin can be watched
+      const W = box.clientWidth, H = box.clientHeight
+      // Draw well past the screen's own sharpness (at least three times CSS size, 1.5x the pixel ratio above that) and to a whole number of pixels, and let the browser filter it down.
+      // At the screen's exact resolution the thin needles and small crescents show their pixel steps, and a fractional pixel ratio left the canvas short of the real pixels and stretched.
+      const dpr = Math.min(4, Math.max(3, (window.devicePixelRatio || 1) * 1.5))
+      const pw = Math.round(W * dpr), ph = Math.round(H * dpr)
+      if (canvas.width !== pw || canvas.height !== ph) {
+        canvas.width = pw; canvas.height = ph; st.W = W; st.H = H
+        ctx.setTransform(pw / W, 0, 0, ph / H, 0, 0)
         ctx.fillStyle = st.th.bg; ctx.fillRect(0, 0, W, H)
       }
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      ctx.setTransform(pw / W, 0, 0, ph / H, 0, 0)
 
       const th = st.th
       // the spinner lives between the top buttons and whatever the dock takes up right now, so it centres in that space and shrinks to fit it
@@ -715,9 +720,10 @@ export default function Spin() {
           const crossed = Math.min(Math.abs(a1 - a0), N)
           const dir = a1 > a0 ? 1 : -1
           for (let j = 1; j <= crossed; j++) trigger(r, ((a0 + dir * j) % N + N) % N)
-          if (!r.leaving && now - r.lastNote > noteGap(r)) { r.lastNote = now; note(a1, r); if (TUNE.haptic && !r.replay) navigator.vibrate?.(TUNE.haptic) }
+          if (!r.leaving && now - r.lastNote > noteGap(r)) { r.lastNote = now; note(a1, r); r.sing[((a1 % r.n) + r.n) % r.n] = 1; if (TUNE.haptic && !r.replay) navigator.vibrate?.(TUNE.haptic) }
         }
         for (let i = 0; i < r.pulse.length; i++) r.pulse[i] = Math.max(0, r.pulse[i] - dt * (r.voice === 'ripple' ? 1 / RIPPLE_LIFE : 1.6))
+        for (let i = 0; i < r.sing.length; i++) r.sing[i] = Math.max(0, r.sing[i] - dt / (SING_LIFE[r.voice] ?? 1)) // only notes that actually sounded, for as long as their tone rings
         if (r.voice !== 'ripple') stepPops(r, dt)
         fastest = Math.max(fastest, Math.abs(r.w))
       }
@@ -767,14 +773,14 @@ export default function Spin() {
         // no guide line behind any of the shapes: the dots alone make the ring (Ripple's rippled line is the shape itself)
 
         // one dot in this instrument's shape, centred at (x, y) and pointing outward along `ang`
-        const drawDot = (x: number, y: number, ang: number, r: number, color: string, alpha: number, deg = -1) => {
+        const drawDot = (x: number, y: number, ang: number, r: number, color: string, alpha: number, deg = -1, sx = 1, sy = 1) => { // sx and sy stretch a shape along and across the ring (only the bass uses them)
           const m = deg < 0 ? 1 : KEYS[deg] // the five scale degrees repeat round the ring, so a graduated length or size repeats with them, like the keys of the real instrument
           const ca = Math.cos(ang), sa = Math.sin(ang)
           ctx.globalAlpha = alpha * ra; ctx.fillStyle = color; ctx.strokeStyle = color
           ctx.beginPath()
           switch (rg.voice) { // every instrument has its own shape
-            case 'kalimba': lens(ctx, x, y, ca, sa, r * 1.6 * m, Math.max(1.1, r * 0.26)); break // a long, fine needle
-            case 'marimba': lens(ctx, x, y, ca, sa, r * 1.4 * m, r * 0.55); break // a shorter, fuller blade
+            case 'kalimba': lens(ctx, x, y, ca, sa, r * 1.6 * m * sx, Math.max(1.1, r * 0.26) * sy); break // a long, fine needle (sx and sy let a plucked tine swell)
+            case 'marimba': lens(ctx, x, y, ca, sa, r * 1.4 * m * sx, r * 0.55 * sy); break // a shorter, fuller blade (sx and sy let a struck bar swell)
             case 'bowl': { // a bowl in profile: a flat rim facing outward with sharp pointed corners, and a smooth round belly
               const w = r * 1.4 * (deg < 0 ? 1 : 0.88 + 0.12 * m), d = w * 0.62, tx = -sa, ty = ca
               const pt = (u: number, v: number): [number, number] => [x + tx * w * u + ca * d * v, y + ty * w * u + sa * d * v] // u across the bowl, v from belly (-) to rim (+)
@@ -784,9 +790,9 @@ export default function Spin() {
               break
             }
             default: { // bass: a soft diamond, a touch longer along the ring's radius, a little bigger on the first degree
-              const R = r * 0.95 * (deg < 0 ? 1 : 0.7 + 0.5 * (m - 0.6) / 0.55), tx = -sa, ty = ca
-              ctx.moveTo(x + ca * R, y + sa * R); ctx.lineTo(x + tx * R * 0.55, y + ty * R * 0.55)
-              ctx.lineTo(x - ca * R, y - sa * R); ctx.lineTo(x - tx * R * 0.55, y - ty * R * 0.55)
+              const R = r * 0.95 * (deg < 0 ? 1 : 0.7 + 0.5 * (m - 0.6) / 0.55) * sx, W = R * 0.55 * sy / sx, tx = -sa, ty = ca
+              ctx.moveTo(x + ca * R, y + sa * R); ctx.lineTo(x + tx * W, y + ty * W)
+              ctx.lineTo(x - ca * R, y - sa * R); ctx.lineTo(x - tx * W, y - ty * W)
               ctx.closePath(); ctx.fill()
               ctx.lineWidth = Math.max(0.8, r * 0.2); ctx.lineJoin = 'round'; ctx.stroke() // a hairline of the same colour rounds the points off
             }
@@ -824,10 +830,38 @@ export default function Spin() {
         for (let i = 0; i < (ripple ? 0 : N); i++) {
           const p = rg.pop[i] // a spring: 0 at rest, about 1 at the top of the pop, and a touch below 0 if it overshoots
           const ang = rg.rot + i * rg.step
-          const r = r0 * (1 + p * (reduceRef.current ? Math.min(TUNE.popSize, 0.15) : TUNE.popSize))
-          const x = cx + Math.cos(ang) * R, y = cy + Math.sin(ang) * R
-          const tilt = rg.voice === 'marimba' || rg.voice === 'bowl' || reduceRef.current ? 0 : p * TUNE.popTilt * (i % 2 ? 1 : -1) // a passing detent also tips the shape a little, one way then the other (the Marimba bars and Bowl crescents only grow)
-          drawDot(x, y, ang + tilt, r, accent, 1, i % 5)
+          const bloom = rg.voice === 'bowl' && !reduceRef.current ? 0.4 * rg.sing[i] ** 0.7 : 0 // a bowl that sings swells by 40% and eases back over the tone; one that only passes does nothing
+          const r = r0 * (bloom + 1 + p * (reduceRef.current ? Math.min(TUNE.popSize, 0.15) : TUNE.popSize * (rg.voice === 'kalimba' ? 0.3 : rg.voice === 'marimba' ? 0.4 : rg.voice === 'drops' ? 0.5 : rg.voice === 'bowl' ? 0 : 1))) // a kalimba tine barely grows (it swings) and a marimba bar only a little (it is struck)
+          const lift = rg.voice === 'bowl' && !reduceRef.current ? rg.sing[i] ** 0.7 * r0 * 0.4 : 0 // and lifts a little outward as it swells
+          const dip = rg.voice === 'marimba' && !reduceRef.current ? Math.max(-0.3, p) * r0 * 0.9 : 0 // a bar is pressed inward by the mallet and springs back, a touch past where it started
+          const x = cx + Math.cos(ang) * (R + lift - dip), y = cy + Math.sin(ang) * (R + lift - dip)
+          const tilt = rg.voice === 'marimba' || rg.voice === 'bowl' || rg.voice === 'kalimba' || rg.voice === 'drops' || reduceRef.current ? 0 : p * TUNE.popTilt * (i % 2 ? 1 : -1) // a passing detent also tips the shape a little, one way then the other (the Marimba bars and Bowl crescents only grow)
+          if (rg.voice === 'kalimba' && !reduceRef.current && rg.sing[i] > 0.005) {
+            // a plucked tine is fixed at its inner end and swings from there: a damped wobble, a little under 10 swings a second, dying away with the tone
+            const t = (1 - rg.sing[i]) * (SING_LIFE.kalimba ?? 0.9)
+            const phi = (i % 2 ? 1 : -1) * 0.5 * Math.exp(-t * 5.5) * Math.sin(t * Math.PI * 2 * 9)
+            const ms = rg.sing[i] ** 0.7, sx = 1 + 0.3 * ms, sy = 1 + 1.2 * ms // and it swells: a third longer, more than twice as thick, lighter toward the ink colour, easing back over about a second
+            const h = r * 1.6 * KEYS[i % 5] * sx, bx = x - Math.cos(ang) * h, by = y - Math.sin(ang) * h // the inner end stays where it is
+            const kx = bx + Math.cos(ang + phi) * h, ky = by + Math.sin(ang + phi) * h
+            drawDot(kx, ky, ang + phi, r, accent, 1, i % 5, sx, sy)
+            drawDot(kx, ky, ang + phi, r, th.ink, 0.85 * rg.sing[i] ** 1.5, i % 5, sx, sy)
+          } else if (rg.voice === 'drops' && !reduceRef.current && rg.sing[i] > 0.005) {
+            // a plucked bass string: the bead stretches along the ring the instant it sounds, then rocks between long and short, slowly, losing a little each time, for as long as the note rings
+            const t = (1 - rg.sing[i]) * (SING_LIFE.drops ?? 2)
+            const sw = Math.exp(-t * 1.6) * Math.cos(t * Math.PI * 2 * 2.2)
+            const rb = r * (1 + 0.3 * rg.sing[i] ** 0.7) // and the whole bead swells a little and lights toward the ink colour, easing back with the note
+            drawDot(x, y, ang, rb, accent, 1, i % 5, 1 + 0.55 * sw, 1 - 0.3 * sw)
+            drawDot(x, y, ang, rb, th.ink, 0.8 * rg.sing[i] ** 2, i % 5, 1 + 0.55 * sw, 1 - 0.3 * sw)
+          } else if (rg.voice === 'marimba' && !reduceRef.current && rg.sing[i] > 0.01) {
+            // a struck bar swells, lengthening a third and nearly doubling in thickness, and lights toward the ink colour; both ease back over about a second
+            const ms = rg.sing[i] ** 0.7, sx = 1 + 0.35 * ms, sy = 1 + 1.0 * ms
+            drawDot(x, y, ang, r, accent, 1, i % 5, sx, sy)
+            drawDot(x, y, ang, r, th.ink, 0.85 * rg.sing[i] ** 1.5, i % 5, sx, sy)
+          } else if (rg.voice === 'bowl' && !reduceRef.current && rg.sing[i] > 0.01) {
+            // a bowl that sings gets the same treatment as a struck bar or a plucked tine: bigger, and lit toward the ink colour, both easing back with the tone
+            drawDot(x, y, ang, r, accent, 1, i % 5)
+            drawDot(x, y, ang, r, th.ink, 0.85 * rg.sing[i] ** 1.5, i % 5)
+          } else drawDot(x, y, ang + tilt, r, accent, 1, i % 5)
         }
       }
 
@@ -858,7 +892,7 @@ export default function Spin() {
     return best
   }
   const down = (e: React.PointerEvent) => {
-    ensureAudio(); setTouched(true); setPokeTick((n) => n + 1)
+    ensureAudio(); setPokeTick((n) => n + 1)
     const rg = pickRing(e)
     if (rg) markSeen('spin') // the first ring you take hold of ends the 'Spin to play' cue for good
     if (!rg || rg.dragging) return // a second finger on a ring that is already held never takes it over; another ring can be held at the same time
@@ -879,7 +913,7 @@ export default function Spin() {
     if (a1 !== a0) {
       const dir = a1 > a0 ? 1 : -1
       for (let k = 1; k <= Math.min(Math.abs(a1 - a0), N); k++) trigger(rg, ((a0 + dir * k) % N + N) % N)
-      if (now - rg.lastNote > noteGap(rg)) { rg.lastNote = now; note(a1, rg); if (TUNE.haptic) navigator.vibrate?.(TUNE.haptic) }
+      if (now - rg.lastNote > noteGap(rg)) { rg.lastNote = now; note(a1, rg); rg.sing[((a1 % rg.n) + rg.n) % rg.n] = 1; if (TUNE.haptic) navigator.vibrate?.(TUNE.haptic) }
     }
     rg.lastA = a; rg.lastT = now
   }
@@ -901,7 +935,7 @@ export default function Spin() {
   const poke = () => setPokeTick((n) => n + 1)
   // an instrument icon puts its ring on the screen or takes it off (at least one stays); the rings re-nest by their order in the dock
   const toggleVoice = (v: Voice) => {
-    ensureAudio(); setTouched(true); markSeen('instruments')
+    ensureAudio(); markSeen('instruments')
     const on = active.includes(v)
     const next = VOICES.filter((x) => (x === v ? !on : active.includes(x)))
     setActive(next)
@@ -943,7 +977,7 @@ export default function Spin() {
   }
   const loopPlay = (resume = false) => { const lp = loopRef.current; lp.mode = 'play'; lp.repeat = true; lp.t0 = performance.now() - (resume ? lp.pausedAt * 1000 : 0); lp.fresh = true; setProg(resume && lp.dur ? lp.pausedAt / lp.dur : 0); setLoopMode('play') } // the draw loop starts the background sounds from the loop's clock
   const loopTap = () => { // the loop slot in the bottom row
-    ensureAudio(); setTouched(true)
+    ensureAudio()
     const lp = loopRef.current
     if (lp.mode === 'idle') loopStart()
     else if (lp.mode === 'rec') {
@@ -979,7 +1013,7 @@ export default function Spin() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loopMode])
   const layerSet = (name: LayerName, on: boolean): boolean => {
-    ensureAudio(); setTouched(true)
+    ensureAudio()
     const lpr = loopRef.current
     if (lpr.mode === 'rec') lpr.layerEvents.push({ t: (performance.now() - lpr.t0) / 1000, name, on, level: levelsRef.current[name] }) // while recording, every switch of a background sound is written down too
     if (name === 'pad') { setPadOn(on); setPad(on) }
@@ -1043,7 +1077,7 @@ export default function Spin() {
   const onKey = (e: React.KeyboardEvent) => {
     if (e.target !== e.currentTarget) return
     poke(); ensureAudio()
-    const push = (d: number) => { for (const r of s.current.rings) if (!r.leaving) r.w = Math.max(-TUNE.maxW, Math.min(TUNE.maxW, r.w + d)); setTouched(true); markSeen('spin'); e.preventDefault() } // arrows spin every ring
+    const push = (d: number) => { for (const r of s.current.rings) if (!r.leaving) r.w = Math.max(-TUNE.maxW, Math.min(TUNE.maxW, r.w + d)); markSeen('spin'); e.preventDefault() } // arrows spin every ring
     if (e.key === 'ArrowRight') push(3)
     else if (e.key === 'ArrowLeft') push(-3)
   }
