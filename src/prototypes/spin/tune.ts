@@ -2,6 +2,7 @@
 export type TuneDef = { key: string; label: string; hint: string; min: number; max: number; step: number; value: number }
 
 export const TUNE_DEFS = [
+  { key: 'timeScale', label: 'Slow motion', hint: 'the whole animation runs at this fraction of real time (1 = normal), so a spin cycle can be watched step by step. Sound stays at normal speed. ?slow=0.1 sets it from the address', min: 0.02, max: 1, step: 0.01, value: 1 },
   { key: 'decay', label: 'Decay', hint: 'how fast it slows (per second). Lower = glides longer', min: 0.05, max: 2, step: 0.01, value: 1.13 },
   { key: 'drift', label: 'Idle drift', hint: 'the slowest it ever turns (rad/s)', min: 0, max: 0.6, step: 0.01, value: 0 },
   { key: 'maxW', label: 'Max speed', hint: 'speed cap (rad/s)', min: 6, max: 60, step: 1, value: 16 },
@@ -35,3 +36,7 @@ export const TUNE_DEFS = [
 export type TuneKey = (typeof TUNE_DEFS)[number]['key']
 export const TUNE = Object.fromEntries(TUNE_DEFS.map((d) => [d.key, d.value])) as Record<TuneKey, number>
 export const TUNING = typeof location !== 'undefined' && new URLSearchParams(location.search).has('tune')
+{ // ?slow=0.1 starts in slow motion
+  const q = typeof location !== 'undefined' ? parseFloat(new URLSearchParams(location.search).get('slow') || '') : NaN
+  if (q > 0) TUNE.timeScale = Math.max(0.02, Math.min(1, q))
+}
