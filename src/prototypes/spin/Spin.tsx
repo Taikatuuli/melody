@@ -51,7 +51,9 @@ type SpinState = { rings: Ring[]; th: Theme; fbT: number; muted: boolean; cyFrac
 // the loop: you record how you spin the rings, and then the rings spin themselves that way, over and over
 type LoopFrame = { t: number; rots: Partial<Record<Voice, number>> }
 type LoopMode = 'idle' | 'rec' | 'ready' | 'play' // ready: a sample is kept and stopped; play: it is playing back
-type LoopState = { layers: LayerName[]; repeat: boolean; pausedAt: number; mode: LoopMode; t0: number; frames: LoopFrame[]; dur: number; lastTT: number; fresh: boolean }
+type LayerState = { on: boolean; level: number }
+type LayerEvent = { t: number; name: LayerName; on: boolean; level: number } // a background sound switched, or its volume changed, t seconds into the recording
+type LoopState = { layers: LayerName[]; layerInit: Record<LayerName, LayerState>; layerFinal: Record<LayerName, LayerState>; layerEvents: LayerEvent[]; evIdx: number; repeat: boolean; pausedAt: number; mode: LoopMode; t0: number; frames: LoopFrame[]; dur: number; lastTT: number; fresh: boolean }
 const rotAt = (frames: LoopFrame[], voice: Voice, tt: number): number | null => { // the recorded angle of a ring at time tt, by interpolating between two frames
   let lo = 0, hi = frames.length - 1
   while (lo < hi) { const mid = (lo + hi) >> 1; if (frames[mid].t < tt) lo = mid + 1; else hi = mid }
@@ -72,6 +74,7 @@ const LOOP_MAX = 30 // the longest loop that can be recorded, in seconds
 const REC_RED = '#e5484d' // the record dot and its timer ring
 const DEFAULT_LEVEL = 0.6 // the volume a layer's sound was designed at: a layer's volume is 0 to 1, and its gain is volume / this
 const START_LEVELS: Record<LayerName, number> = { pad: 0.45, sub: 0.15, vinyl: 0.15 } // where each layer starts: the Pad sits further forward, the Sub hum and Vinyl underneath
+const noLayers = (): Record<LayerName, LayerState> => ({ pad: { on: false, level: 0 }, sub: { on: false, level: 0 }, vinyl: { on: false, level: 0 } })
 const LEVELS_KEY = 'spin-levels-v2' // bumped so everyone picks up the new starting volumes
 const readLevels = (): Record<LayerName, number> => {
   const d = { ...START_LEVELS }
@@ -258,7 +261,7 @@ export default function Spin() {
   const [reviewing, setReviewing] = useState(false) // the sample menu: save, loop or discard. It replaces the other controls while it is open
   const loopEnd = useRef<() => void>()
   const [undoable, setUndoable] = useState(false) // a discarded sample can be brought back for a few seconds
-  const undoRef = useRef<{ frames: LoopFrame[]; dur: number; layers: LayerName[]; timer: number } | null>(null)
+  const undoRef = useRef<{ frames: LoopFrame[]; dur: number; layers: LayerName[]; init: Record<LayerName, LayerState>; final: Record<LayerName, LayerState>; events: LayerEvent[]; timer: number } | null>(null)
   const pauseBtn = useRef<HTMLButtonElement>(null)
   const recBtn = useRef<HTMLButtonElement>(null)
   const wasReviewing = useRef(false)
@@ -266,6 +269,7 @@ export default function Spin() {
   const lastPick = useRef<Ring | null>(null) // the ring you last grabbed: it keeps the grab when the gaps are tight
   const arrowRef = useRef<HTMLDivElement>(null)
   const layerOnRef = useRef<Record<LayerName, boolean>>({ pad: false, sub: false, vinyl: false })
+  const layerFns = useRef<{ applyAt: (tt: number) => void; step: (tt: number) => void } | null>(null) // the draw loop asks for the background sounds to follow the loop's clock
   const ringTL = useRef<SVGCircleElement>(null) // the timer ring on the record button and the one on the play/pause button are drawn straight onto the SVG, so a ticking clock never re-renders the whole screen
   const ringMenu = useRef<SVGCircleElement>(null)
   const progRef = useRef(0) // how far through the recording (or the sample) we are, 0 to 1
@@ -300,7 +304,7 @@ export default function Spin() {
   const padRef = useRef<{ gain: GainNode; oscs: OscillatorNode[]; lfo: OscillatorNode; timer: number } | null>(null)
   const subRef = useRef<Layer | null>(null)
   const vinylRef = useRef<Layer | null>(null)
-  const loopRef = useRef<LoopState>({ layers: [], repeat: true, pausedAt: 0, mode: 'idle', t0: 0, frames: [], dur: 0, lastTT: 0, fresh: false })
+  const loopRef = useRef<LoopState>({ layers: [], layerInit: noLayers(), layerFinal: noLayers(), layerEvents: [], evIdx: 0, repeat: true, pausedAt: 0, mode: 'idle', t0: 0, frames: [], dur: 0, lastTT: 0, fresh: false })
 
   const shapeScale = useRef(1) // how much the ring shapes shrink when the rings sit closer together
   const [land, setLand] = useState(false)
@@ -346,8 +350,10 @@ export default function Spin() {
   const say = (text: string) => { // show a short note above the dock, and put the instrument's name back a moment later
     setCaption(text); clearTimeout(captionTimer.current); captionTimer.current = window.setTimeout(() => setCaption(null), 900)
   }
-  const setLevel = (name: LayerName, v: number) => {
+  const setLevel = (name: LayerName, v: number, record = true) => {
     const lv = Math.max(0, Math.min(1, v))
+    const lpr = loopRef.current
+    if (record && lpr.mode === 'rec') lpr.layerEvents.push({ t: (performance.now() - lpr.t0) / 1000, name, on: layerOnRef.current[name], level: lv })
     levelsRef.current = { ...levelsRef.current, [name]: lv }; setLevels(levelsRef.current)
     const a = audio.current
     if (a) a.bus[name].gain.setTargetAtTime(lv / DEFAULT_LEVEL, a.ctx.currentTime, 0.05)
@@ -633,7 +639,10 @@ export default function Spin() {
       if (lp.mode === 'play') {
         const el = (now - lp.t0) / 1000
         if (!lp.repeat && el >= lp.dur) { lp.mode = 'ready'; loopEnd.current?.() } // played through once: back to ready, the rings carry on by themselves
-        else { tt = el % lp.dur; resync = lp.fresh || tt < lp.lastTT; lp.lastTT = tt; lp.fresh = false }
+        else {
+          tt = el % lp.dur; resync = lp.fresh || tt < lp.lastTT; lp.lastTT = tt; lp.fresh = false
+          if (resync) layerFns.current?.applyAt(tt); else layerFns.current?.step(tt) // the background sounds follow the same clock as the rings
+        }
       }
       let fastest = 0
       for (const r of rings) {
@@ -869,10 +878,28 @@ export default function Spin() {
   layerOnRef.current = layerOn // read by the loop functions, which the 30 second timer can call from an older render
   // Loop, step by step: 1. tap the record button and spin the rings. 2. tap again when done: the sample starts looping at once, and the controls give way to two choices, loop and discard.
   // Loop stops the sample and goes back to the instruments (touching a ring does the same but lets it keep playing); discard deletes it. 3. the sample sits in the bottom row, and tapping it brings the two choices back.
-  const loopStart = () => { const lp = loopRef.current; if (undoRef.current) { clearTimeout(undoRef.current.timer); undoRef.current = null; setUndoable(false) } lp.pausedAt = 0; lp.mode = 'rec'; lp.t0 = performance.now(); lp.frames = []; setProg(0); setLoopMode('rec') }
+  const loopStart = () => { const lp = loopRef.current; if (undoRef.current) { clearTimeout(undoRef.current.timer); undoRef.current = null; setUndoable(false) } lp.pausedAt = 0; lp.mode = 'rec'; lp.t0 = performance.now(); lp.frames = []; lp.layerInit = snapLayers(); lp.layerEvents = []; lp.evIdx = 0; setProg(0); setLoopMode('rec') }
   // The background sounds are part of a recording: the ones that were playing when you finished are noted, play again with the sample, and stop when you pause it
-  const withSample = (on: boolean) => { for (const n of loopRef.current.layers) layerSet(n, on) }
-  const loopPlay = (resume = false) => { const lp = loopRef.current; lp.mode = 'play'; lp.repeat = true; lp.t0 = performance.now() - (resume ? lp.pausedAt * 1000 : 0); lp.fresh = true; setProg(resume && lp.dur ? lp.pausedAt / lp.dur : 0); setLoopMode('play'); withSample(true) }
+  const snapLayers = () => { const o = noLayers(); for (const n of LAYERS) o[n] = { on: layerOnRef.current[n], level: levelsRef.current[n] }; return o }
+  const applyLayer = (n: LayerName, st: LayerState) => { // set a background sound to a recorded state, without writing it down or saving its volume
+    if (levelsRef.current[n] !== st.level) setLevel(n, st.level, false)
+    if (layerOnRef.current[n] !== st.on) layerSet(n, st.on)
+  }
+  const silenceSample = () => { for (const n of loopRef.current.layers) layerSet(n, false) } // pausing stops every background sound the recording used
+  layerFns.current = {
+    applyAt: (tt) => { // the loop (re)starts at tt: the sounds jump to the state they had at that moment of the recording
+      const lp = loopRef.current, st = { ...lp.layerInit }
+      let i = 0
+      while (i < lp.layerEvents.length && lp.layerEvents[i].t <= tt) { const e = lp.layerEvents[i++]; st[e.name] = { on: e.on, level: e.level } }
+      lp.evIdx = i
+      for (const n of lp.layers) applyLayer(n, st[n])
+    },
+    step: (tt) => { // the clock moved on: replay each switch as its moment passes
+      const lp = loopRef.current
+      while (lp.evIdx < lp.layerEvents.length && lp.layerEvents[lp.evIdx].t <= tt) { const e = lp.layerEvents[lp.evIdx++]; applyLayer(e.name, { on: e.on, level: e.level }) }
+    },
+  }
+  const loopPlay = (resume = false) => { const lp = loopRef.current; lp.mode = 'play'; lp.repeat = true; lp.t0 = performance.now() - (resume ? lp.pausedAt * 1000 : 0); lp.fresh = true; setProg(resume && lp.dur ? lp.pausedAt / lp.dur : 0); setLoopMode('play') } // the draw loop starts the background sounds from the loop's clock
   const loopTap = () => { // the loop slot in the bottom row
     ensureAudio(); setTouched(true)
     const lp = loopRef.current
@@ -880,26 +907,26 @@ export default function Spin() {
     else if (lp.mode === 'rec') {
       const dur = lp.frames.length ? lp.frames[lp.frames.length - 1].t : 0
       if (dur < 1) { lp.mode = 'idle'; lp.frames = []; setLoopMode('idle'); say('Spin something first'); return }
-      lp.dur = dur; lp.pausedAt = 0; lp.layers = LAYERS.filter((n) => layerOnRef.current[n]); setReviewing(true); loopPlay(); say('Playing recording') // it plays, over and over, as soon as the recording ends
+      lp.dur = dur; lp.pausedAt = 0; lp.layerFinal = snapLayers(); lp.layers = LAYERS.filter((n) => lp.layerInit[n].on || lp.layerEvents.some((e) => e.name === n)); setReviewing(true); loopPlay(); say('Playing recording') // it plays, over and over, as soon as the recording ends
     } else setReviewing(true) // a saved sample: open its choices again
   }
   const loopLoop = () => { // the sample plays over and over, from the moment recording ends, until you pause it; play picks up where it left off
     const lp = loopRef.current
-    if (lp.mode === 'play') { lp.pausedAt = lp.dur > 0 ? (((performance.now() - lp.t0) / 1000) % lp.dur) : 0; lp.mode = 'ready'; setLoopMode('ready'); withSample(false); say('Paused') }
+    if (lp.mode === 'play') { lp.pausedAt = lp.dur > 0 ? (((performance.now() - lp.t0) / 1000) % lp.dur) : 0; lp.mode = 'ready'; setLoopMode('ready'); silenceSample(); say('Paused') }
     else { loopPlay(true); say('Playing recording') }
   }
   const loopDiscard = () => { // the sample is kept for six seconds, so an accidental discard can be undone
     const lp = loopRef.current
     if (undoRef.current) clearTimeout(undoRef.current.timer)
-    undoRef.current = { frames: lp.frames, dur: lp.dur, layers: lp.layers, timer: window.setTimeout(() => { undoRef.current = null; setUndoable(false) }, 6000) }
-    withSample(true) // leaving puts the background sounds back as they were when you recorded
-    lp.mode = 'idle'; lp.frames = []; lp.dur = 0; lp.pausedAt = 0; lp.layers = []; setLoopMode('idle'); setReviewing(false); setUndoable(true); say('Discarded · undo available')
+    undoRef.current = { frames: lp.frames, dur: lp.dur, layers: lp.layers, init: lp.layerInit, final: lp.layerFinal, events: lp.layerEvents, timer: window.setTimeout(() => { undoRef.current = null; setUndoable(false) }, 6000) }
+    for (const n of lp.layers) applyLayer(n, lp.layerFinal[n]) // leaving puts the background sounds back as they were when the recording ended
+    lp.mode = 'idle'; lp.frames = []; lp.dur = 0; lp.pausedAt = 0; lp.layers = []; lp.layerEvents = []; setLoopMode('idle'); setReviewing(false); setUndoable(true); say('Discarded · undo available')
   }
   const loopUndo = () => {
     const u = undoRef.current, lp = loopRef.current
     if (!u || lp.mode !== 'idle') return
     clearTimeout(u.timer); undoRef.current = null; setUndoable(false)
-    lp.frames = u.frames; lp.dur = u.dur; lp.layers = u.layers; lp.pausedAt = 0; setReviewing(true); loopPlay(); say('Restored')
+    lp.frames = u.frames; lp.dur = u.dur; lp.layers = u.layers; lp.layerInit = u.init; lp.layerFinal = u.final; lp.layerEvents = u.events; lp.pausedAt = 0; setReviewing(true); loopPlay(); say('Restored')
   }
   loopEnd.current = () => setLoopMode('ready')
   useEffect(() => { // keep keyboard and screen-reader focus with you: onto Pause when the menu opens, back onto the record button when it closes
@@ -919,6 +946,8 @@ export default function Spin() {
   }, [loopMode])
   const layerSet = (name: LayerName, on: boolean): boolean => {
     ensureAudio(); setTouched(true)
+    const lpr = loopRef.current
+    if (lpr.mode === 'rec') lpr.layerEvents.push({ t: (performance.now() - lpr.t0) / 1000, name, on, level: levelsRef.current[name] }) // while recording, every switch of a background sound is written down too
     if (name === 'pad') { setPadOn(on); setPad(on) }
     else if (name === 'sub') { setSubOn(on); setSub(on) }
     else { setVinylOn(on); setVinyl(on) }
