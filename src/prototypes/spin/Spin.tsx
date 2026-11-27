@@ -70,13 +70,13 @@ const LAYER_LABELS: Record<LayerName, string> = { pad: 'Pad', sub: 'Sub hum', vi
 // on a phone held sideways the controls move to a column on the right and the rings take the rest, instead of being squeezed into a strip between them
 const LAND_PANEL = 276
 const isLandscape = (w: number, h: number) => h > 0 && h < 440 && w > h * 1.25 // measured on the screen itself, so a phone frame on a desktop page is judged by its own size
-// First-run guidance: no tour and no welcome screen, just a quiet cue at the moment each feature is first in reach. The first is "Spin to play" in the middle of the rings, until you spin one;
-// after that a cue at a time appears (instruments, then the mixer, then recording), waits for you, fades by itself, and is remembered. Using the feature skips its cue. Add ?intro to the address to see them all again.
+// First-run guidance: no tour and no welcome screen, just a quiet cue at the moment a feature is first in reach. The first is "Spin to play" in the middle of the rings, until you spin one;
+// after that, "Tap an instrument to layer it" appears once above the instrument row, fades by itself, and is remembered. Using the feature skips it. Add ?intro to the address to see them both again.
 const ONBOARD_KEY = 'spin-onboarding:v1'
-type Cue = 'instruments' | 'mixer' | 'record'
+type Cue = 'instruments'
 type Seen = Partial<Record<'spin' | Cue, boolean>>
-const CUE_ORDER: Cue[] = ['instruments', 'mixer', 'record']
-const CUE_TEXT: Record<Cue, string> = { instruments: 'Tap an instrument to layer it', mixer: 'Tap a sound to add depth', record: 'Record a loop' }
+const CUE_ORDER: Cue[] = ['instruments']
+const CUE_TEXT: Record<Cue, string> = { instruments: 'Tap an instrument to layer it' }
 const readSeen = (): Seen => {
   try {
     if (new URLSearchParams(location.search).has('intro')) { localStorage.removeItem(ONBOARD_KEY); return {} }
@@ -322,12 +322,11 @@ export default function Spin() {
     const next = CUE_ORDER.find((k) => !seen[k])
     if (!next) return
     if (next === 'instruments' && active.length > 1) { markSeen('instruments'); return } // already layering: nothing to teach
-    if (next === 'mixer' && (padOn || subOn || vinylOn)) { markSeen('mixer'); return }
-    if ((next === 'instruments' && !instOpen) || (next === 'mixer' && !layersOpen)) return // wait until the panel the cue points at is showing
-    const t = window.setTimeout(() => setCue(next), next === 'instruments' ? 6000 : 9000)
+    if (!instOpen) return // wait until the row the cue points at is showing
+    const t = window.setTimeout(() => setCue(next), 6000)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seen, active.length, reviewing, loopMode, instOpen, layersOpen, padOn, subOn, vinylOn])
+  }, [seen, active.length, reviewing, loopMode, instOpen])
   useEffect(() => { // a cue fades after a few seconds and counts as seen
     if (!cue) return
     const t = window.setTimeout(() => { markSeen(cue); setCue(null) }, 7000)
@@ -944,7 +943,7 @@ export default function Spin() {
   }
   const loopPlay = (resume = false) => { const lp = loopRef.current; lp.mode = 'play'; lp.repeat = true; lp.t0 = performance.now() - (resume ? lp.pausedAt * 1000 : 0); lp.fresh = true; setProg(resume && lp.dur ? lp.pausedAt / lp.dur : 0); setLoopMode('play') } // the draw loop starts the background sounds from the loop's clock
   const loopTap = () => { // the loop slot in the bottom row
-    ensureAudio(); setTouched(true); markSeen('record')
+    ensureAudio(); setTouched(true)
     const lp = loopRef.current
     if (lp.mode === 'idle') loopStart()
     else if (lp.mode === 'rec') {
@@ -989,7 +988,6 @@ export default function Spin() {
     return true
   }
   const layerToggle = (name: LayerName) => { // a plain tap or click
-    markSeen('mixer')
     const on = !layerOn[name]
     if (on && levelsRef.current[name] < 0.05) setLevel(name, START_LEVELS[name])
     layerSet(name, on); say(`${LAYER_LABELS[name]} ${on ? 'on' : 'off'}`)
@@ -1072,9 +1070,6 @@ export default function Spin() {
         opacity: active.length === 0 ? (emptyHint ? 0.55 : 0) : (seen.spin ? 0 : 0.55), transition: 'opacity .6s ease-out' }}>
         {active.length === 0 ? <>Tap an instrument<br />to start playing</> : <>Spin to<br />play</>}
       </div>
-      {/* the record cue: a few quiet words under the record button, once, after you have settled in */}
-      <div aria-hidden="true" style={{ position: 'absolute', left: 12, top: 'calc(var(--safe-top) + 56px)', display: 'flex', alignItems: 'center', color: 'var(--ink)', pointerEvents: 'none', whiteSpace: 'nowrap', fontSize: 11, fontWeight: 400, letterSpacing: 2, textTransform: 'uppercase',
-        opacity: cue === 'record' && loopMode === 'idle' && !reviewing ? 0.6 : 0, transition: 'opacity .6s ease-out' }}>{CUE_TEXT.record}</div>
       {/* the sample: top left. Record, and once there is a recording, a button that brings back its play, pause and discard choices */}
       <div onPointerDown={stop} style={{ position: 'absolute', zIndex: 1, top: 'calc(var(--safe-top) + 8px)', left: 8, ...hideWhenLooping(chrome ? 0.9 : 0.6) }}>
         <button type="button" ref={recBtn} className="sp-lay" aria-label={loopMode === 'rec' ? 'Recording. Tap when done' : loopMode === 'idle' ? 'Record a sample' : 'Sample. Tap for play, pause and discard'}
@@ -1116,7 +1111,7 @@ export default function Spin() {
         style={{ position: 'absolute', ...dockPos, bottom: `calc(var(--safe-bottom) + ${reviewing ? 16 : sndBottom}px)`,
           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, color: 'var(--ink)',
           ...dockMotion(0.8, instOpen || layersOpen || reviewing) }}>
-        <div aria-hidden="true" className="sp-cap">{caption ?? (reviewing ? (loopMode === 'play' ? 'Playing recording' : 'Paused') : cue === 'instruments' || cue === 'mixer' ? CUE_TEXT[cue] : null)}</div>
+        <div aria-hidden="true" className="sp-cap">{caption ?? (reviewing ? (loopMode === 'play' ? 'Playing recording' : 'Paused') : cue ? CUE_TEXT[cue] : null)}</div>
         {reviewing ? (
           /* the sample menu: only play or pause (it plays over and over until paused) and discard, so there is nothing else to tap */
           <div role="group" aria-label="Sample" style={{ display: 'flex', gap: 16 }}>
