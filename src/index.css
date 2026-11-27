@@ -45,3 +45,5 @@ input, textarea, select { font-size: 16px; } /* stops iOS focus-zoom */
 
 /* Spin fills the page in a phone-width column; the stage behind it takes its palette */
 .spin-active .stage { background: transparent; }
+/* and on a desktop page it has no phone frame: the page is the app */
+.spin-active .screen { width: 100%; height: 100dvh; border: 0; border-radius: 0; box-shadow: none; transform: none; }
